@@ -7,6 +7,8 @@ from src.tokenizer import build_tokenizer, run_lexical_initialization
 from src.pruning import prune_tokenizer_and_model
 
 from transformers import AutoTokenizer
+from src.data_prep.pipeline import run_data_prep_pipeline
+
 
 def load_config(config_path):
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -153,7 +155,9 @@ def prune(config, dummy_data):
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to data prep configuration YAML.')
 def data_prep(config):
     """Run Data Deduplication (MinHash LSH) stage."""
-    pass
+    cfg = load_config(config)
+    click.echo(f"Starting Data Prep stage with config: {cfg}")
+    run_data_prep_pipeline(cfg)
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to CPT configuration YAML.')
