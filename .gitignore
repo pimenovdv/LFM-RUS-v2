@@ -216,3 +216,5 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+lfm-russian-lexical/
+new_tokenizer.json
