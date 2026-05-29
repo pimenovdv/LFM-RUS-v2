@@ -89,3 +89,96 @@ class SpamLogCyclicFilter(BaseFilter):
             return False
 
         return True
+
+from transformers import pipeline
+import torch
+from typing import Tuple, List, Union
+
+class TransformersClassifierFilter(BaseFilter):
+    def __init__(
+        self,
+        model_name: str,
+        keep_labels: Union[Tuple[str, float], List[Tuple[str, float]], None] = None,
+        remove_labels: Union[Tuple[str, float], List[Tuple[str, float]], None] = None,
+        batch_size: int = 16,
+        device: str = None,
+        exclusion_writer = None,
+        **kwargs
+    ):
+        super().__init__(exclusion_writer=exclusion_writer, batch_size=batch_size, **kwargs)
+        self.model_name = model_name
+
+        if keep_labels and remove_labels:
+            raise ValueError("You can only specify one of keep_labels or remove_labels")
+
+        if keep_labels and isinstance(keep_labels, tuple):
+            keep_labels = [keep_labels]
+        if remove_labels and isinstance(remove_labels, tuple):
+            remove_labels = [remove_labels]
+
+        self.keep_labels = keep_labels
+        self.remove_labels = remove_labels
+
+        if device is None:
+            self.device = 0 if torch.cuda.is_available() else -1
+        else:
+            self.device = device
+
+        self._pipeline = None
+
+    @property
+    def classifier(self):
+        if self._pipeline is None:
+            # Initialize pipeline lazily to avoid loading it on main process if using multiprocessing
+            self._pipeline = pipeline(
+                "text-classification",
+                model=self.model_name,
+                device=self.device,
+                truncation=True,
+                max_length=512
+            )
+        return self._pipeline
+
+    def filter(self, doc):
+        # BaseFilter requires this to be implemented, but we rely on filter_batch
+        raise NotImplementedError("Use filter_batch instead")
+
+    def filter_batch(self, batch):
+        texts = [doc.text for doc in batch]
+        # Transformers pipeline natively handles batching if passed a list
+        # Note: Depending on transformers version, might need to specify batch_size=len(texts) to pipeline call itself
+        predictions = self.classifier(texts, batch_size=len(texts))
+
+        results = []
+        for doc, pred in zip(batch, predictions):
+            label = pred['label']
+            score = pred['score']
+
+            doc.metadata["classifier_label"] = label
+            doc.metadata["classifier_score"] = score
+
+            keep = True
+            reason = None
+
+            if self.keep_labels:
+                keep = False
+                for k_label, k_score in self.keep_labels:
+                    if label == k_label and score >= k_score:
+                        keep = True
+                        break
+                if not keep:
+                    reason = f"label {label} ({score:.2f}) not in keep_labels thresholds"
+
+            elif self.remove_labels:
+                for r_label, r_score in self.remove_labels:
+                    if label == r_label and score >= r_score:
+                        keep = False
+                        reason = f"label {label} ({score:.2f}) meets remove_label threshold"
+                        break
+
+            if keep:
+                results.append(True)
+            else:
+                results.append((False, reason))
+
+        return results
