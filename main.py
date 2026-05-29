@@ -4,6 +4,8 @@ import tempfile
 import fasttext
 from datasets import Dataset, interleave_datasets, load_dataset
 from src.tokenizer import build_tokenizer, run_lexical_initialization
+from src.pruning import prune_tokenizer_and_model
+
 from transformers import AutoTokenizer
 
 def load_config(config_path):
@@ -119,9 +121,33 @@ def tokenizer(config, dummy_data):
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to pruning configuration YAML.')
-def prune(config):
+@click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
+def prune(config, dummy_data):
     """Run Tokenizer Pruning & Optimization stage."""
-    pass
+    cfg = load_config(config)
+    click.echo(f"Starting Pruning stage with config: {cfg}")
+
+    model_name = cfg.get("model_name", "sshleifer/tiny-gpt2")
+    min_freq = cfg.get("min_freq", 100)
+    output_dir = cfg.get("output_dir", "./lfm-pruned")
+
+    if dummy_data:
+        click.echo("Using simple dummy dataset for pruning...")
+        dataset = [{"text": "hello world"}, {"text": "hello python"}, {"text": "кошка"}]
+    else:
+        # Load dataset according to your actual config logic
+        dataset_path = cfg.get("dataset_path")
+        if dataset_path:
+            click.echo(f"Loading dataset from {dataset_path}...")
+            dataset = load_dataset("json", data_files=f"{dataset_path}/*.jsonl", split="train")
+            max_samples = cfg.get("max_samples", 500000)
+            dataset = dataset.select(range(min(len(dataset), max_samples)))
+        else:
+            click.echo("Error: No dataset_path provided and not using dummy data.")
+            return
+
+    prune_tokenizer_and_model(model_name, dataset, min_freq, output_dir)
+    click.echo("Pruning stage completed successfully.")
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to data prep configuration YAML.')
