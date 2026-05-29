@@ -1,3 +1,21 @@
 stage: tokenizer
-model_name: "base_model"
+model_name: "sshleifer/tiny-gpt2"
+vocab_size: 50
 focus: true
+use_translation_init: true
+dataset_ratios:
+  ru: 0.40
+  en: 0.30
+  code: 0.15
+  math: 0.15
+dataset_paths:
+  ru: "oscar"
+  en: "wikitext"
+  code: "codeparrot/github-code"
+  math: "math-dataset/math-dataset"
+translation_dict:
+  "кошка": "cat"
+  "собака": "dog"
+  "нейросеть": "neural network"
+  "обучение": "learning"
+save_path: null
