@@ -1,0 +1,3 @@
+stage: sft
+batch_size: 16
+packing: true

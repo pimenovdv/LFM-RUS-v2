@@ -1,0 +1,2 @@
+stage: task_sft
+use_lora: true
