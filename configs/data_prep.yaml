@@ -12,3 +12,8 @@ filters:
   remove_seo: true
   remove_logs: true
   remove_cyclic: true
+  fasttext_spam:
+    enabled: true
+    model_url: "hf://datatrove/fasttext-spam/model.bin"
+  fineweb_quality:
+    enabled: true

@@ -11,6 +11,8 @@ from datatrove.pipeline.writers import JsonlWriter
 from datatrove.utils.hashing import HashConfig
 
 from src.data_prep.filters import SpamLogCyclicFilter
+from datatrove.pipeline.filters import FastTextClassifierFilter, FineWebQualityFilter
+
 
 def run_data_prep_pipeline(cfg):
     input_path = cfg.get("input_path", "./data/raw")
@@ -27,6 +29,8 @@ def run_data_prep_pipeline(cfg):
     remove_seo = filters_cfg.get("remove_seo", True)
     remove_logs = filters_cfg.get("remove_logs", True)
     remove_cyclic = filters_cfg.get("remove_cyclic", True)
+    fasttext_spam_cfg = filters_cfg.get("fasttext_spam", {})
+    fineweb_quality_cfg = filters_cfg.get("fineweb_quality", {})
 
     # Common Config
     config = MinhashConfig(
@@ -39,23 +43,46 @@ def run_data_prep_pipeline(cfg):
     INPUT_READER = JsonlReader(input_path)
     TOTAL_TASKS = 1 # local simple execution
 
+
+    stage1_pipeline = [
+        INPUT_READER,
+        SpamLogCyclicFilter(
+            remove_seo=remove_seo,
+            remove_logs=remove_logs,
+            remove_cyclic=remove_cyclic,
+            exclusion_writer=JsonlWriter(os.path.join(output_path, "removed_spam_logs"))
+        )
+    ]
+
+    if fasttext_spam_cfg.get("enabled", False):
+        model_url = fasttext_spam_cfg.get("model_url", "hf://datatrove/fasttext-spam/model.bin")
+        stage1_pipeline.append(
+            FastTextClassifierFilter(
+                model_url=model_url,
+                exclusion_writer=JsonlWriter(os.path.join(output_path, "removed_fasttext_spam"))
+            )
+        )
+
+    if fineweb_quality_cfg.get("enabled", False):
+        stage1_pipeline.append(
+            FineWebQualityFilter(
+                exclusion_writer=JsonlWriter(os.path.join(output_path, "removed_fineweb_quality"))
+            )
+        )
+
+    stage1_pipeline.append(
+        MinhashDedupSignature(
+            output_folder=os.path.join(mh_base, "signatures"),
+            config=config
+        )
+    )
+
     # 1. Custom Filter + Signatures
     stage1 = LocalPipelineExecutor(
-        pipeline=[
-            INPUT_READER,
-            SpamLogCyclicFilter(
-                remove_seo=remove_seo,
-                remove_logs=remove_logs,
-                remove_cyclic=remove_cyclic,
-                exclusion_writer=JsonlWriter(os.path.join(output_path, "removed_spam_logs"))
-            ),
-            MinhashDedupSignature(
-                output_folder=os.path.join(mh_base, "signatures"),
-                config=config
-            )
-        ],
+        pipeline=stage1_pipeline,
         tasks=TOTAL_TASKS
     )
+
 
     # 2. Buckets
     stage2 = LocalPipelineExecutor(
