@@ -1,2 +1,14 @@
 stage: data_prep
 method: "minhash_lsh"
+input_path: "./data/raw"
+output_path: "./data/deduplicated"
+minhash_base_path: "./data/minhash"
+minhash_config:
+  n_grams: 5
+  num_buckets: 14
+  hashes_per_bucket: 8
+  precision: 64
+filters:
+  remove_seo: true
+  remove_logs: true
+  remove_cyclic: true
