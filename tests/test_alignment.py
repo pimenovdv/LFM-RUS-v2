@@ -75,3 +75,19 @@ def test_run_alignment_ipo_dummy(mocker, tmp_path):
     }
 
     run_alignment_pipeline(cfg, dummy_data=True)
+
+def test_run_alignment_kto_dummy(mocker, tmp_path):
+    mocker.patch('trl.KTOTrainer.train', return_value=None)
+    mocker.patch('trl.KTOTrainer.save_model', return_value=None)
+    mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
+    mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
+
+    cfg = {
+        "method": "kto",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "kto_out"),
+        "epochs": 1
+    }
+
+    cfg['push_to_hub'] = 'dummy/alignment'
+    run_alignment_pipeline(cfg, dummy_data=True)

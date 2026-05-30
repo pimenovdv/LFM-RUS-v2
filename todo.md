@@ -8,7 +8,7 @@
 - [x] **Реализовать IPO (Identity Preference Optimization)**
   - Добавить поддержку `loss_type="ipo"` в текущий класс `DPOTrainer` / `DPOConfig` (библиотека `trl` поддерживает это из коробки).
   - Добавить обработку параметра `method: ipo` в `run_alignment_pipeline`.
-- [ ] **Реализовать KTO (Kahneman-Tversky Optimization)**
+- [x] **Реализовать KTO (Kahneman-Tversky Optimization)**
   - Настроить формат датасета для одиночных ответов с бинарной меткой (👍 / 👎).
   - Интегрировать класс `KTOTrainer` из библиотеки `trl`.
   - Добавить обработку параметра `method: kto` в `run_alignment_pipeline`.
