@@ -182,3 +182,94 @@ class TransformersClassifierFilter(BaseFilter):
                 results.append((False, reason))
 
         return results
+
+import json
+from openai import OpenAI
+class OpenAIClassifierFilter(BaseFilter):
+    def __init__(
+        self,
+        model_name: str,
+        prompt: str,
+        good_label: str,
+        bad_label: str,
+        api_key: str = None,
+        base_url: str = None,
+        batch_size: int = 16,
+        exclusion_writer=None,
+        **kwargs
+    ):
+        super().__init__(exclusion_writer=exclusion_writer, batch_size=batch_size, **kwargs)
+        self.model_name = model_name
+        self.prompt = prompt
+        self.good_label = good_label
+        self.bad_label = bad_label
+        self.api_key = api_key
+        self.base_url = base_url
+
+        self._client = None
+
+    @property
+    def client(self):
+        if self._client is None:
+            client_kwargs = {}
+            if self.api_key:
+                client_kwargs["api_key"] = self.api_key
+            if self.base_url:
+                client_kwargs["base_url"] = self.base_url
+            self._client = OpenAI(**client_kwargs)
+        return self._client
+
+    def filter(self, doc):
+        raise NotImplementedError("Use filter_batch instead")
+
+    def filter_batch(self, batch):
+        results = []
+        for doc in batch:
+            text = doc.text
+
+            schema = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "classification",
+                    "strict": True,
+                    "schema": {
+                        "type": "object",
+                        "properties": {
+                            "label": {
+                                "type": "string",
+                                "enum": [self.good_label, self.bad_label]
+                            }
+                        },
+                        "required": ["label"],
+                        "additionalProperties": False
+                    }
+                }
+            }
+
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": self.prompt},
+                        {"role": "user", "content": text}
+                    ],
+                    response_format=schema,
+                    temperature=0.0
+                )
+
+                content = response.choices[0].message.content
+                parsed = json.loads(content)
+                label = parsed.get("label")
+
+                doc.metadata["openai_label"] = label
+
+                if label == self.good_label:
+                    results.append(True)
+                else:
+                    results.append((False, f"openai classified as {label}"))
+
+            except Exception as e:
+                # If API fails, default to rejecting to be safe, or could log it
+                results.append((False, f"openai api error: {str(e)}"))
+
+        return results
