@@ -7,6 +7,9 @@ def test_run_sft_dummy_data(mocker):
     mock_model = mocker.patch("src.sft.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.sft.SFTTrainer")
     mock_sft_config = mocker.patch("src.sft.SFTConfig")
+    mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
+    mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
+    mocker.patch('trl.SFTTrainer.push_to_hub', return_value=None)
 
     mock_tok_inst = MagicMock()
     mock_tok_inst.pad_token = None
@@ -29,6 +32,7 @@ def test_run_sft_dummy_data(mocker):
         "logging_steps": 5
     }
 
+    cfg['push_to_hub'] = 'dummy/sft'
     run_sft(cfg, dummy_data=True)
 
     mock_tokenizer.assert_called_once_with("dummy_model")
@@ -45,6 +49,9 @@ def test_run_sft_real_data(mocker):
     mock_model = mocker.patch("src.sft.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.sft.SFTTrainer")
     mock_sft_config = mocker.patch("src.sft.SFTConfig")
+    mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
+    mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
+    mocker.patch('trl.SFTTrainer.push_to_hub', return_value=None)
     mock_load_dataset = mocker.patch("src.sft.load_dataset")
     mock_interleave = mocker.patch("src.sft.interleave_datasets")
 

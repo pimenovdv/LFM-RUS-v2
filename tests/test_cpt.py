@@ -9,6 +9,9 @@ def test_run_cpt_dummy_data(mocker):
     mock_trainer = mocker.patch("src.cpt.Trainer")
     mock_training_args = mocker.patch("src.cpt.TrainingArguments")
     mock_data_collator = mocker.patch("src.cpt.DataCollatorForLanguageModeling")
+    mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
+    mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
+    mocker.patch('src.cpt.Trainer.push_to_hub', return_value=None)
 
     mock_tokenizer.return_value.pad_token = None
     mock_tokenizer.return_value.eos_token = "<|endoftext|>"
@@ -26,6 +29,7 @@ def test_run_cpt_dummy_data(mocker):
     }
 
     # Run with dummy data
+    cfg['push_to_hub'] = 'dummy/cpt'
     run_cpt(cfg, dummy_data=True)
 
     # Check assertions

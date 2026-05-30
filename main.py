@@ -120,7 +120,13 @@ def tokenizer(config, dummy_data):
 
     # we can pass save_path from config or default it to None so we don't pollute repo during test
     save_path = cfg.get("save_path", None)
-    run_lexical_initialization(model_name, new_ru_tokens, cfg, fasttext_model_path=ft_model_path, save_path=save_path)
+    tokenizer, model = run_lexical_initialization(model_name, new_ru_tokens, cfg, fasttext_model_path=ft_model_path, save_path=save_path)
+
+    push_repo = cfg.get("push_to_hub")
+    if push_repo:
+        click.echo(f"Pushing tokenizer model to Hub: {push_repo}...")
+        model.push_to_hub(push_repo)
+        tokenizer.push_to_hub(push_repo)
 
     click.echo("Tokenizer stage completed successfully.")
 
@@ -151,7 +157,12 @@ def prune(config, dummy_data):
             click.echo("Error: No dataset_path provided and not using dummy data.")
             return
 
-    prune_tokenizer_and_model(model_name, dataset, min_freq, output_dir)
+    pruned_tokenizer, model = prune_tokenizer_and_model(model_name, dataset, min_freq, output_dir)
+    push_repo = cfg.get("push_to_hub")
+    if push_repo:
+        click.echo(f"Pushing pruned model to Hub: {push_repo}...")
+        model.push_to_hub(push_repo)
+        pruned_tokenizer.push_to_hub(push_repo)
     click.echo("Pruning stage completed successfully.")
 
 @cli.command()

@@ -94,6 +94,14 @@ def run_task_sft(cfg, dummy_data):
         tokenizer=tokenizer,
     )
 
+
     print("Starting Task Supervised Fine-Tuning...")
     trainer.train()
+
+    push_repo = cfg.get("push_to_hub")
+    if push_repo:
+        print(f"Pushing model to Hub: {push_repo}...")
+        trainer.model.push_to_hub(push_repo, commit_message="Upload Task SFT model")
+        trainer.processing_class.push_to_hub(push_repo, commit_message="Upload Task SFT model") if hasattr(trainer, "processing_class") and trainer.processing_class else trainer.tokenizer.push_to_hub(push_repo, commit_message="Upload Task SFT model") if hasattr(trainer, "tokenizer") and trainer.tokenizer else None
+
     print("Task SFT completed successfully.")

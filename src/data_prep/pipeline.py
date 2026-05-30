@@ -157,4 +157,12 @@ def run_data_prep_pipeline(cfg):
     print("Running Stage 4: Filter Duplicates...")
     stage4.run()
 
+
     print(f"Data Prep Pipeline Completed. Deduplicated output at: {os.path.join(output_path, 'final')}")
+
+    push_repo = cfg.get("push_to_hub")
+    if push_repo:
+        from datasets import load_dataset
+        print(f"Pushing deduplicated dataset to Hub: {push_repo}...")
+        ds = load_dataset("json", data_files=f"{os.path.join(output_path, 'final')}/*.jsonl", split="train")
+        ds.push_to_hub(push_repo)

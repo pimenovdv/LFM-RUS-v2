@@ -7,6 +7,9 @@ def test_run_task_sft_dummy_data_full_ft(mocker):
     mock_model = mocker.patch("src.task_sft.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.task_sft.SFTTrainer")
     mock_sft_config = mocker.patch("src.task_sft.SFTConfig")
+    mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
+    mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
+    mocker.patch('trl.SFTTrainer.push_to_hub', return_value=None)
 
     mock_tok_inst = MagicMock()
     mock_tok_inst.pad_token = None
@@ -25,6 +28,7 @@ def test_run_task_sft_dummy_data_full_ft(mocker):
         "output_dir": "./dummy_task_sft_output"
     }
 
+    cfg['push_to_hub'] = 'dummy/task_sft'
     run_task_sft(cfg, dummy_data=True)
 
     mock_tokenizer.assert_called_once_with("dummy_model")
@@ -39,6 +43,9 @@ def test_run_task_sft_dummy_data_lora(mocker):
     mock_model = mocker.patch("src.task_sft.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.task_sft.SFTTrainer")
     mock_sft_config = mocker.patch("src.task_sft.SFTConfig")
+    mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
+    mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
+    mocker.patch('trl.SFTTrainer.push_to_hub', return_value=None)
     mock_get_peft = mocker.patch("peft.get_peft_model")
     mock_lora_config = mocker.patch("peft.LoraConfig")
 
@@ -61,6 +68,7 @@ def test_run_task_sft_dummy_data_lora(mocker):
         }
     }
 
+    cfg['push_to_hub'] = 'dummy/task_sft'
     run_task_sft(cfg, dummy_data=True)
 
     mock_lora_config.assert_called_once()
@@ -73,6 +81,9 @@ def test_run_task_sft_real_data(mocker):
     mock_model = mocker.patch("src.task_sft.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.task_sft.SFTTrainer")
     mock_sft_config = mocker.patch("src.task_sft.SFTConfig")
+    mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
+    mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
+    mocker.patch('trl.SFTTrainer.push_to_hub', return_value=None)
     mock_load_dataset = mocker.patch("src.task_sft.load_dataset")
     mock_interleave = mocker.patch("src.task_sft.interleave_datasets")
 
