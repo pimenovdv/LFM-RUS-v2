@@ -9,6 +9,7 @@ from src.pruning import prune_tokenizer_and_model
 from transformers import AutoTokenizer
 from src.data_prep.pipeline import run_data_prep_pipeline
 from src.cpt import run_cpt
+from src.sft import run_sft
 
 
 def load_config(config_path):
@@ -171,9 +172,12 @@ def cpt(config, dummy_data):
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to SFT configuration YAML.')
-def sft(config):
+@click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
+def sft(config, dummy_data):
     """Run Supervised Fine-Tuning (General SFT) stage."""
-    pass
+    cfg = load_config(config)
+    click.echo(f"Starting Supervised Fine-Tuning (General SFT) stage with config: {cfg}")
+    run_sft(cfg, dummy_data)
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to alignment configuration YAML.')
