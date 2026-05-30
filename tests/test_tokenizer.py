@@ -1,10 +1,8 @@
-import pytest
 import torch
 import fasttext
 import tempfile
 import os
 from src.tokenizer import build_tokenizer, run_lexical_initialization
-from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def test_build_tokenizer_digits():
     data = ["test 1234"]

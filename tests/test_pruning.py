@@ -1,7 +1,5 @@
-import pytest
 import os
 import shutil
-import torch
 from transformers import AutoTokenizer
 from src.pruning import prune_tokenizer_and_model
 

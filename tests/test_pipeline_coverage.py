@@ -1,8 +1,5 @@
-import os
 import json
 from src.data_prep.pipeline import run_data_prep_pipeline
-import tempfile
-import yaml
 
 def test_run_data_prep_pipeline(tmp_path):
     # Create dummy raw data
@@ -87,7 +84,6 @@ def test_run_data_prep_pipeline_fasttext(tmp_path, mocker):
 
 
 def test_run_data_prep_pipeline_transformers(tmp_path, mocker):
-    from src.data_prep.filters import TransformersClassifierFilter
 
     # Mock pipeline factory
     mock_pipeline = mocker.MagicMock()
@@ -166,8 +162,8 @@ def test_transformers_classifier_remove_labels(mocker):
 
     results = filter_obj.filter_batch(docs)
 
-    assert results[0][0] == False
-    assert results[1] == True
+    assert not results[0][0]
+    assert results[1]
 
 def test_transformers_classifier_keep_labels_list(mocker):
     from src.data_prep.filters import TransformersClassifierFilter
@@ -193,5 +189,5 @@ def test_transformers_classifier_keep_labels_list(mocker):
 
     results = filter_obj.filter_batch(docs)
 
-    assert results[0] == True
-    assert results[1][0] == False
+    assert results[0]
+    assert not results[1][0]

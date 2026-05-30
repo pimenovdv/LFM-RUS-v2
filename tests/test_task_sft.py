@@ -6,7 +6,7 @@ def test_run_task_sft_dummy_data_full_ft(mocker):
     mock_tokenizer = mocker.patch("src.task_sft.AutoTokenizer.from_pretrained")
     mock_model = mocker.patch("src.task_sft.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.task_sft.SFTTrainer")
-    mock_sft_config = mocker.patch("src.task_sft.SFTConfig")
+    mocker.patch("src.task_sft.SFTConfig")
     mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
     mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
     mocker.patch('trl.SFTTrainer.push_to_hub', return_value=None)
@@ -42,7 +42,7 @@ def test_run_task_sft_dummy_data_lora(mocker):
     mock_tokenizer = mocker.patch("src.task_sft.AutoTokenizer.from_pretrained")
     mock_model = mocker.patch("src.task_sft.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.task_sft.SFTTrainer")
-    mock_sft_config = mocker.patch("src.task_sft.SFTConfig")
+    mocker.patch("src.task_sft.SFTConfig")
     mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
     mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
     mocker.patch('trl.SFTTrainer.push_to_hub', return_value=None)
@@ -77,10 +77,10 @@ def test_run_task_sft_dummy_data_lora(mocker):
     mock_trainer.return_value.train.assert_called_once()
 
 def test_run_task_sft_real_data(mocker):
-    mock_tokenizer = mocker.patch("src.task_sft.AutoTokenizer.from_pretrained")
-    mock_model = mocker.patch("src.task_sft.AutoModelForCausalLM.from_pretrained")
+    mocker.patch("src.task_sft.AutoTokenizer.from_pretrained")
+    mocker.patch("src.task_sft.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.task_sft.SFTTrainer")
-    mock_sft_config = mocker.patch("src.task_sft.SFTConfig")
+    mocker.patch("src.task_sft.SFTConfig")
     mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
     mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
     mocker.patch('trl.SFTTrainer.push_to_hub', return_value=None)
@@ -106,7 +106,7 @@ def test_run_task_sft_real_data(mocker):
     mock_trainer.return_value.train.assert_called_once()
 
 def test_run_task_sft_no_datasets(mocker):
-    mock_tokenizer = mocker.patch("src.task_sft.AutoTokenizer.from_pretrained")
+    mocker.patch("src.task_sft.AutoTokenizer.from_pretrained")
 
     cfg = {
         "model_name": "dummy_model",

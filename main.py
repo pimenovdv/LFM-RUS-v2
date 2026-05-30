@@ -2,7 +2,7 @@ import click
 import yaml
 import tempfile
 import fasttext
-from datasets import Dataset, interleave_datasets, load_dataset
+from datasets import interleave_datasets, load_dataset
 from src.tokenizer import build_tokenizer, run_lexical_initialization
 from src.pruning import prune_tokenizer_and_model
 
