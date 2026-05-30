@@ -12,3 +12,15 @@ filters:
   remove_seo: true
   remove_logs: true
   remove_cyclic: true
+  fasttext_spam:
+    enabled: true
+    model_url: "hf://datatrove/fasttext-spam/model.bin"
+  fineweb_quality:
+    enabled: true
+  transformers_classifier:
+    enabled: true
+    model_name: "HuggingFaceTB/fineweb-edu-classifier"
+    batch_size: 32
+    keep_labels:
+      - ["4", 0.5]
+      - ["5", 0.5]
