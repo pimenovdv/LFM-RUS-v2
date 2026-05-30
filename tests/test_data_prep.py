@@ -34,3 +34,57 @@ def test_cyclic_filter():
     repeated_str = "print('hello world') " * 50
     repeated_doc = Document(text=repeated_str, id="3")
     assert filter_obj.filter(repeated_doc) == False
+
+from src.data_prep.filters import OpenAIClassifierFilter
+import json
+
+def test_openai_classifier_filter(mocker):
+    good_doc = Document(text="This is an excellent high quality text.", id="1")
+    bad_doc = Document(text="sdkfjhsdkjfhdsf bad quality.", id="2")
+    error_doc = Document(text="trigger error", id="3")
+
+    filter_obj = OpenAIClassifierFilter(
+        model_name="test-model",
+        prompt="Classify",
+        good_label="good",
+        bad_label="bad",
+        api_key="fake-key"
+    )
+
+    class MockMessage:
+        def __init__(self, content):
+            self.content = content
+
+    class MockChoice:
+        def __init__(self, message):
+            self.message = message
+
+    class MockResponse:
+        def __init__(self, choices):
+            self.choices = choices
+
+    def mock_create(*args, **kwargs):
+        messages = kwargs.get("messages", [])
+        text = messages[1]["content"] if len(messages) > 1 else ""
+        if "excellent" in text:
+            return MockResponse([MockChoice(MockMessage(json.dumps({"label": "good"})))])
+        elif "bad" in text:
+            return MockResponse([MockChoice(MockMessage(json.dumps({"label": "bad"})))])
+        else:
+            raise Exception("API error")
+
+    mocker.patch("openai.resources.chat.completions.Completions.create", side_effect=mock_create)
+
+    results = filter_obj.filter_batch([good_doc, bad_doc, error_doc])
+
+    assert results[0] == True
+    assert good_doc.metadata["openai_label"] == "good"
+
+    assert isinstance(results[1], tuple)
+    assert results[1][0] == False
+    assert "openai classified as bad" in results[1][1]
+    assert bad_doc.metadata["openai_label"] == "bad"
+
+    assert isinstance(results[2], tuple)
+    assert results[2][0] == False
+    assert "openai api error" in results[2][1]

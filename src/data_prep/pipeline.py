@@ -10,7 +10,7 @@ from datatrove.pipeline.readers import JsonlReader
 from datatrove.pipeline.writers import JsonlWriter
 from datatrove.utils.hashing import HashConfig
 
-from src.data_prep.filters import SpamLogCyclicFilter, TransformersClassifierFilter
+from src.data_prep.filters import SpamLogCyclicFilter, TransformersClassifierFilter, OpenAIClassifierFilter
 from datatrove.pipeline.filters import FastTextClassifierFilter, FineWebQualityFilter
 
 
@@ -32,6 +32,7 @@ def run_data_prep_pipeline(cfg):
     fasttext_spam_cfg = filters_cfg.get("fasttext_spam", {})
     fineweb_quality_cfg = filters_cfg.get("fineweb_quality", {})
     transformers_cfg = filters_cfg.get("transformers_classifier", {})
+    openai_cfg = filters_cfg.get("openai_classifier", {})
 
     # Common Config
     config = MinhashConfig(
@@ -88,6 +89,20 @@ def run_data_prep_pipeline(cfg):
                 batch_size=transformers_cfg.get("batch_size", 16),
                 device=transformers_cfg.get("device", None),
                 exclusion_writer=JsonlWriter(os.path.join(output_path, "removed_transformers_classifier"))
+            )
+        )
+
+    if openai_cfg.get("enabled", False):
+        stage1_pipeline.append(
+            OpenAIClassifierFilter(
+                model_name=openai_cfg.get("model_name", "gpt-4o-mini"),
+                prompt=openai_cfg.get("prompt", "Classify this text."),
+                good_label=openai_cfg.get("good_label", "good"),
+                bad_label=openai_cfg.get("bad_label", "bad"),
+                api_key=openai_cfg.get("api_key", None),
+                base_url=openai_cfg.get("base_url", None),
+                batch_size=openai_cfg.get("batch_size", 16),
+                exclusion_writer=JsonlWriter(os.path.join(output_path, "removed_openai_classifier"))
             )
         )
 
