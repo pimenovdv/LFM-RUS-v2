@@ -10,7 +10,7 @@ from transformers import AutoTokenizer
 from src.data_prep.pipeline import run_data_prep_pipeline
 from src.cpt import run_cpt
 from src.sft import run_sft
-
+from src.alignment import run_alignment_pipeline
 
 def load_config(config_path):
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -181,9 +181,12 @@ def sft(config, dummy_data):
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to alignment configuration YAML.')
-def alignment(config):
+@click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
+def alignment(config, dummy_data):
     """Run Alignment (DPO/GRPO) stage."""
-    pass
+    cfg = load_config(config)
+    click.echo(f"Starting Alignment stage with config: {cfg}")
+    run_alignment_pipeline(cfg, dummy_data)
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to task SFT configuration YAML.')
