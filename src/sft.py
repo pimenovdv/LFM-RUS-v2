@@ -1,6 +1,6 @@
 import logging
 from datasets import Dataset, interleave_datasets, load_dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, TrainingArguments
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTTrainer, SFTConfig
 
 logger = logging.getLogger(__name__)

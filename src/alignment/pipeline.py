@@ -1,9 +1,7 @@
-import re
-from typing import Dict, Any, List, Union
+from typing import Dict, Any, List
 from datasets import load_dataset, Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import DPOTrainer, DPOConfig, GRPOTrainer, GRPOConfig
-import torch
 
 def accuracy_reward(prompts: List[str], completions: List[List[Dict[str, str]]], **kwargs) -> List[float]:
     """

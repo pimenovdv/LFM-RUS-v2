@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock
 from src.cpt import run_cpt
 
 def test_run_cpt_dummy_data(mocker):
@@ -7,8 +7,8 @@ def test_run_cpt_dummy_data(mocker):
     mock_tokenizer = mocker.patch("src.cpt.AutoTokenizer.from_pretrained")
     mock_model = mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.cpt.Trainer")
-    mock_training_args = mocker.patch("src.cpt.TrainingArguments")
-    mock_data_collator = mocker.patch("src.cpt.DataCollatorForLanguageModeling")
+    mocker.patch("src.cpt.TrainingArguments")
+    mocker.patch("src.cpt.DataCollatorForLanguageModeling")
     mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
     mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
     mocker.patch('src.cpt.Trainer.push_to_hub', return_value=None)
@@ -41,8 +41,8 @@ def test_run_cpt_dummy_data(mocker):
 
 def test_run_cpt_real_data(mocker):
     # Mocking HF components
-    mock_tokenizer = mocker.patch("src.cpt.AutoTokenizer.from_pretrained")
-    mock_model = mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
+    mocker.patch("src.cpt.AutoTokenizer.from_pretrained")
+    mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.cpt.Trainer")
     mock_load_dataset = mocker.patch("src.cpt.load_dataset")
     mock_interleave = mocker.patch("src.cpt.interleave_datasets")
@@ -76,7 +76,7 @@ def test_run_cpt_real_data(mocker):
 
 def test_run_cpt_no_datasets(mocker):
     # Mocking HF components
-    mock_tokenizer = mocker.patch("src.cpt.AutoTokenizer.from_pretrained")
+    mocker.patch("src.cpt.AutoTokenizer.from_pretrained")
 
     cfg = {
         "model_name": "dummy_model",
@@ -91,8 +91,8 @@ def test_run_cpt_embedding_warmup(mocker):
     mock_tokenizer = mocker.patch("src.cpt.AutoTokenizer.from_pretrained")
     mock_model = mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
     mock_trainer = mocker.patch("src.cpt.Trainer")
-    mock_training_args = mocker.patch("src.cpt.TrainingArguments")
-    mock_data_collator = mocker.patch("src.cpt.DataCollatorForLanguageModeling")
+    mocker.patch("src.cpt.TrainingArguments")
+    mocker.patch("src.cpt.DataCollatorForLanguageModeling")
 
     mock_tokenizer.return_value.pad_token = None
     mock_tokenizer.return_value.eos_token = "<|endoftext|>"
@@ -142,5 +142,5 @@ def test_run_cpt_embedding_warmup(mocker):
     mock_model_instance.get_output_embeddings.assert_called_once()
 
     # Finally, all parameters should have requires_grad = True before main CPT phase
-    assert mock_param_1.requires_grad == True
-    assert mock_param_2.requires_grad == True
+    assert mock_param_1.requires_grad
+    assert mock_param_2.requires_grad
