@@ -102,6 +102,51 @@ def run_cpt(cfg, dummy_data):
 
     data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
+    embedding_warmup_cfg = cfg.get("embedding_warmup", {})
+    if embedding_warmup_cfg.get("enabled", False):
+        print("Starting Embedding Warm-up Phase...")
+
+        # Freeze all parameters
+        for param in model.parameters():
+            param.requires_grad = False
+
+        # Unfreeze input embeddings
+        input_embeddings = model.get_input_embeddings()
+        if input_embeddings is not None:
+            for param in input_embeddings.parameters():
+                param.requires_grad = True
+
+        # Unfreeze output embeddings
+        output_embeddings = model.get_output_embeddings()
+        if output_embeddings is not None:
+            for param in output_embeddings.parameters():
+                param.requires_grad = True
+
+        warmup_args = TrainingArguments(
+            output_dir=cfg.get("output_dir", "./cpt-output") + "-warmup",
+            learning_rate=embedding_warmup_cfg.get("learning_rate", 1e-3),
+            num_train_epochs=embedding_warmup_cfg.get("epochs", 1),
+            per_device_train_batch_size=cfg.get("per_device_train_batch_size", 4),
+            save_steps=cfg.get("save_steps", 1000),
+            logging_steps=cfg.get("logging_steps", 10),
+            save_total_limit=1,
+            do_train=True
+        )
+
+        warmup_trainer = Trainer(
+            model=model,
+            args=warmup_args,
+            train_dataset=lm_datasets,
+            data_collator=data_collator,
+        )
+
+        warmup_trainer.train()
+        print("Embedding Warm-up Phase completed.")
+
+        # Unfreeze all parameters for main CPT phase
+        for param in model.parameters():
+            param.requires_grad = True
+
     trainer = Trainer(
         model=model,
         args=training_args,
