@@ -10,6 +10,10 @@ dataset_ratios:
   en: 0.30
   code: 0.15
   math: 0.15
+embedding_warmup:
+  enabled: true
+  epochs: 1
+  learning_rate: 0.001
 output_dir: "./cpt-output"
 epochs: 3
 learning_rate: 0.0001
