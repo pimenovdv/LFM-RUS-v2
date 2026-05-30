@@ -1,2 +1,21 @@
 stage: task_sft
 use_lora: true
+model_name: "sshleifer/tiny-gpt2"
+max_seq_length: 512
+packing: true
+learning_rate: 2.0e-5
+epochs: 1
+batch_size: 4
+max_steps: 1000
+save_steps: 1000
+logging_steps: 10
+output_dir: "./task-sft-output"
+lora:
+  r: 8
+  lora_alpha: 32
+  target_modules: ["c_attn", "c_proj"]
+  lora_dropout: 0.1
+  bias: "none"
+  task_type: "CAUSAL_LM"
+dataset_paths:
+  task1: "path/to/task1"

@@ -11,6 +11,7 @@ from src.data_prep.pipeline import run_data_prep_pipeline
 from src.cpt import run_cpt
 from src.sft import run_sft
 from src.alignment import run_alignment_pipeline
+from src.task_sft import run_task_sft
 
 def load_config(config_path):
     with open(config_path, 'r', encoding='utf-8') as f:
@@ -190,9 +191,12 @@ def alignment(config, dummy_data):
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to task SFT configuration YAML.')
-def task_sft(config):
+@click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
+def task_sft(config, dummy_data):
     """Run Final Task SFT stage."""
-    pass
+    cfg = load_config(config)
+    click.echo(f"Starting Final Task SFT stage with config: {cfg}")
+    run_task_sft(cfg, dummy_data)
 
 if __name__ == '__main__':
     cli()
