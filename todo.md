@@ -5,7 +5,7 @@
 ## 1. Методы прямой оптимизации (Direct Optimization)
 Методы, не требующие отдельной Reward Model, решающие проблемы нестабильности PPO и снижающие потребление памяти.
 
-- [ ] **Реализовать IPO (Identity Preference Optimization)**
+- [x] **Реализовать IPO (Identity Preference Optimization)**
   - Добавить поддержку `loss_type="ipo"` в текущий класс `DPOTrainer` / `DPOConfig` (библиотека `trl` поддерживает это из коробки).
   - Добавить обработку параметра `method: ipo` в `run_alignment_pipeline`.
 - [ ] **Реализовать KTO (Kahneman-Tversky Optimization)**

@@ -60,3 +60,18 @@ def test_run_alignment_unknown_method(tmp_path):
     cfg['push_to_hub'] = 'dummy/alignment'
     with pytest.raises(ValueError, match="Unknown alignment method: unknown"):
         run_alignment_pipeline(cfg, dummy_data=True)
+
+def test_run_alignment_ipo_dummy(mocker, tmp_path):
+    mocker.patch('trl.DPOTrainer.train', return_value=None)
+    mocker.patch('trl.DPOTrainer.save_model', return_value=None)
+    mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
+    mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
+
+    cfg = {
+        "method": "ipo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "ipo_out"),
+        "epochs": 1
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=True)

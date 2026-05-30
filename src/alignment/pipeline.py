@@ -79,8 +79,8 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
     learning_rate = float(cfg.get("learning_rate", 1e-5))
     epochs = cfg.get("epochs", 1)
 
-    if method == "dpo":
-        print("Starting DPO training...")
+    if method in ["dpo", "ipo"]:
+        print(f"Starting {method.upper()} training...")
         if dummy_data:
             dataset = Dataset.from_dict({
                 "prompt": ["How to write a function?", "Explain math"],
@@ -98,6 +98,7 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
             per_device_train_batch_size=batch_size,
             learning_rate=learning_rate,
             num_train_epochs=epochs,
+            loss_type=cfg.get("loss_type", "ipo" if method == "ipo" else "sigmoid"),
             max_length=cfg.get("max_prompt_length", 512) + cfg.get("max_completion_length", 1024),
             remove_unused_columns=cfg.get("remove_unused_columns", False),
             use_cpu=cfg.get("use_cpu", True), # to avoid bf16 errors on test instances
@@ -114,7 +115,7 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         )
 
         trainer.train()
-        print("DPO training completed.")
+        print(f"{method.upper()} training completed.")
 
     elif method == "grpo":
         print("Starting GRPO (RLVR) training...")
@@ -163,7 +164,7 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         print("GRPO training completed.")
 
     else:
-        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo' or 'grpo'.")
+        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo' or 'grpo'.")
 
 
     trainer.save_model(output_dir)
