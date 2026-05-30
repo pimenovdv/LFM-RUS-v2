@@ -109,6 +109,14 @@ def run_cpt(cfg, dummy_data):
         data_collator=data_collator,
     )
 
+
     print("Starting Continual Pre-Training...")
     trainer.train()
+
+    push_repo = cfg.get("push_to_hub")
+    if push_repo:
+        print(f"Pushing model to Hub: {push_repo}...")
+        trainer.model.push_to_hub(push_repo, commit_message="Upload CPT model")
+        trainer.processing_class.push_to_hub(push_repo, commit_message="Upload CPT model") if hasattr(trainer, "processing_class") and trainer.processing_class else trainer.tokenizer.push_to_hub(push_repo, commit_message="Upload CPT model") if hasattr(trainer, "tokenizer") and trainer.tokenizer else None
+
     print("CPT completed successfully.")

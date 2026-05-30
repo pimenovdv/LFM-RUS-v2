@@ -167,5 +167,12 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
     else:
         raise ValueError(f"Unknown alignment method: {method}. Use 'dpo' or 'grpo'.")
 
+
     trainer.save_model(output_dir)
     print(f"Model saved to {output_dir}")
+
+    push_repo = cfg.get("push_to_hub")
+    if push_repo:
+        print(f"Pushing model to Hub: {push_repo}...")
+        trainer.model.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model")
+        trainer.processing_class.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model") if hasattr(trainer, "processing_class") and trainer.processing_class else trainer.tokenizer.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model") if hasattr(trainer, "tokenizer") and trainer.tokenizer else None

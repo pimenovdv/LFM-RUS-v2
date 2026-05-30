@@ -1,24 +1,24 @@
-# Configuration Files
+# Конфигурационные файлы
 
-The pipeline stages are configured using YAML files located in the `configs/` directory.
+Этапы пайплайна настраиваются с помощью YAML-файлов, расположенных в директории `configs/`.
 
-### Tokenizer configuration (`tokenizer.yaml`)
-Configures the tokenizer training parameters, vocabulary size, lexical initialization methods (e.g., FOCUS), and paths and ratios of datasets used for training.
+### Конфигурация токенизатора (`tokenizer.yaml`)
+Настраивает параметры обучения токенизатора, размер словаря, методы лексической инициализации (например, FOCUS), а также пути и пропорции датасетов, используемых для обучения.
 
-### Pruning configuration (`pruning.yaml`)
-Specifies the model to prune, the calibration dataset path, the minimum frequency of tokens to keep, and the output directory for the pruned model.
+### Конфигурация прунинга (`pruning.yaml`)
+Указывает модель для прунинга, путь к калибровочному датасету, минимальную частоту сохраняемых токенов и директорию для сохранения урезанной модели.
 
-### Data Prep configuration (`data_prep.yaml`)
-Contains settings for the data cleaning and deduplication pipeline. Defines input and output paths, MinHash LSH configuration (n-grams, buckets, etc.), and settings for various filters (spam, SEO, cyclic).
+### Конфигурация подготовки данных (`data_prep.yaml`)
+Содержит настройки пайплайна очистки и дедупликации данных. Определяет пути ввода и вывода, конфигурацию MinHash LSH (n-граммы, корзины и т.д.) и настройки для различных фильтров (спам, SEO, циклические повторения).
 
-### Continual Pre-Training (`cpt.yaml`)
-Defines the hyper-parameters for the CPT stage, such as batch sizes, learning rates, gradient accumulation, sequence length, and checkpointing intervals.
+### Непрерывное предварительное обучение (`cpt.yaml`)
+Определяет гиперпараметры для этапа CPT (Continual Pre-Training), такие как размер батча, скорость обучения, накопление градиентов, длина последовательности и интервалы сохранения контрольных точек.
 
-### Supervised Fine-Tuning (`sft.yaml`)
-Provides configuration for SFT, including max sequence lengths, sequence packing, packing arguments, and model saving locations.
+### Контролируемое дообучение (`sft.yaml`)
+Содержит конфигурацию для SFT, включая максимальную длину последовательности, упаковку последовательностей, аргументы упаковки и пути для сохранения модели.
 
-### Alignment configuration (`alignment.yaml`)
-Configures alignment methods (DPO or GRPO). Allows selecting the reward functions to use (like accuracy or variance) and general training parameters.
+### Конфигурация выравнивания (`alignment.yaml`)
+Настраивает методы выравнивания (DPO или GRPO). Позволяет выбирать используемые функции вознаграждения (например, точность или дисперсия) и общие параметры обучения.
 
-### Task SFT configuration (`task_sft.yaml`)
-Includes configurations for the final targeted fine-tuning, including the specific target modules to use if PEFT/LoRA is enabled.
+### Конфигурация целевого SFT (`task_sft.yaml`)
+Включает конфигурации для финального целевого дообучения (Task SFT), включая специфические целевые модули для использования, если включен PEFT/LoRA.
