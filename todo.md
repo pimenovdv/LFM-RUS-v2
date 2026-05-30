@@ -12,7 +12,7 @@
 *   **Задача**: Подготовка датасета для Continual Pre-Training. Запуск конвейера дедупликации на базе MinHash и LSH (используя DataTrove) с возможной GPU-акселерацией (cuDF/Dask) для предотвращения doom looping.
 *   **Конфигурация**: `configs/data_prep.yaml`
 
-## 4. Continual Pre-Training (CPT)
+## 4. [x] Continual Pre-Training (CPT)
 *   **Задача**: Продолженное предобучение модели на собранном корпусе (~101B токенов) с учетом различных доменов (ru, en, code, math). Настройка гиперпараметров обучения и чекпоинтирования.
 *   **Конфигурация**: `configs/cpt.yaml`
 

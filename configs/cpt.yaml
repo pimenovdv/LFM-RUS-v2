@@ -1,3 +1,17 @@
 stage: cpt
+model_name: "sshleifer/tiny-gpt2"
+dataset_paths:
+  ru: "data/ru_corpus"
+  en: "data/en_corpus"
+  code: "data/code_corpus"
+  math: "data/math_corpus"
+dataset_ratios:
+  ru: 0.40
+  en: 0.30
+  code: 0.15
+  math: 0.15
+output_dir: "./cpt-output"
 epochs: 3
 learning_rate: 0.0001
+per_device_train_batch_size: 4
+save_steps: 1000

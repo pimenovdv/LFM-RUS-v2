@@ -8,6 +8,7 @@ from src.pruning import prune_tokenizer_and_model
 
 from transformers import AutoTokenizer
 from src.data_prep.pipeline import run_data_prep_pipeline
+from src.cpt import run_cpt
 
 
 def load_config(config_path):
@@ -161,9 +162,12 @@ def data_prep(config):
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to CPT configuration YAML.')
-def cpt(config):
+@click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
+def cpt(config, dummy_data):
     """Run Continual Pre-Training (CPT) stage."""
-    pass
+    cfg = load_config(config)
+    click.echo(f"Starting Continual Pre-Training (CPT) stage with config: {cfg}")
+    run_cpt(cfg, dummy_data)
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to SFT configuration YAML.')
