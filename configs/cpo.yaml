@@ -1,0 +1,8 @@
+stage: alignment
+method: "cpo"
+learning_rate: 1.0e-5
+batch_size: 4
+max_prompt_length: 512
+max_completion_length: 1024
+epochs: 1
+dataset_path: "json"

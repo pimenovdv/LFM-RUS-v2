@@ -2,6 +2,7 @@ from typing import Dict, Any, List
 from datasets import load_dataset, Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl.experimental.orpo import ORPOTrainer, ORPOConfig
+from trl.experimental.cpo import CPOTrainer, CPOConfig
 from trl import DPOTrainer, DPOConfig, GRPOTrainer, GRPOConfig, KTOTrainer, KTOConfig
 
 def accuracy_reward(prompts: List[str], completions: List[List[Dict[str, str]]], **kwargs) -> List[float]:
@@ -243,8 +244,44 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
 
         trainer.train()
         print("ORPO training completed.")
+
+    elif method == "cpo":
+        print("Starting CPO training...")
+        if dummy_data:
+            dataset = Dataset.from_dict({
+                "prompt": ["How to write a function?", "Explain math"],
+                "chosen": ["def func(): pass", "Math is logic"],
+                "rejected": ["func func func func", "math math math"]
+            })
+        else:
+            dataset_path = cfg.get("dataset_path")
+            if not dataset_path:
+                raise ValueError("dataset_path must be provided in config for CPO")
+            dataset = format_dpo_dataset(dataset_path)
+
+        cpo_config = CPOConfig(
+            output_dir=output_dir,
+            per_device_train_batch_size=batch_size,
+            learning_rate=learning_rate,
+            num_train_epochs=epochs,
+            max_length=cfg.get("max_prompt_length", 512) + cfg.get("max_completion_length", 1024),
+            remove_unused_columns=cfg.get("remove_unused_columns", False),
+            use_cpu=cfg.get("use_cpu", True),
+            bf16=cfg.get("bf16", False),
+            fp16=cfg.get("fp16", False)
+        )
+
+        trainer = CPOTrainer(
+            model=model,
+            args=cpo_config,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+        )
+
+        trainer.train()
+        print("CPO training completed.")
     else:
-        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo' or 'orpo'.")
+        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo' or 'cpo'.")
 
 
     trainer.save_model(output_dir)

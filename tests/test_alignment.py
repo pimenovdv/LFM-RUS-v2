@@ -1,3 +1,4 @@
+from datasets import Dataset
 import pytest
 from src.alignment.pipeline import run_alignment_pipeline, accuracy_reward, variance_reward
 
@@ -107,3 +108,175 @@ def test_run_alignment_orpo_dummy(mocker, tmp_path):
 
     cfg['push_to_hub'] = 'dummy/alignment'
     run_alignment_pipeline(cfg, dummy_data=True)
+
+def test_run_alignment_cpo_dummy(mocker, tmp_path):
+    mocker.patch('trl.experimental.cpo.CPOTrainer.train', return_value=None)
+    mocker.patch('trl.experimental.cpo.CPOTrainer.save_model', return_value=None)
+    mocker.patch('transformers.PreTrainedModel.push_to_hub', return_value=None)
+    mocker.patch('transformers.PreTrainedTokenizerBase.push_to_hub', return_value=None)
+
+    cfg = {
+        "method": "cpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "cpo_out"),
+        "epochs": 1
+    }
+
+    cfg['push_to_hub'] = 'dummy/alignment'
+    run_alignment_pipeline(cfg, dummy_data=True)
+
+def test_run_alignment_dpo_with_data(mocker, tmp_path):
+    mocker.patch('trl.DPOTrainer.train', return_value=None)
+    mocker.patch('trl.DPOTrainer.save_model', return_value=None)
+    mocker.patch('src.alignment.pipeline.format_dpo_dataset', return_value=Dataset.from_dict({'prompt': ['a'], 'chosen': ['b'], 'rejected': ['c']}))
+    mocker.patch('src.alignment.pipeline.format_kto_dataset', return_value=Dataset.from_dict({'prompt': ['a'], 'completion': ['b'], 'label': [True]}))
+    mocker.patch('src.alignment.pipeline.format_grpo_dataset', return_value=Dataset.from_dict({'prompt': ['a']}))
+
+    cfg = {
+        "method": "dpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "dpo_out"),
+        "epochs": 1,
+        "dataset_path": "dummy_path"
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_grpo_with_data(mocker, tmp_path):
+    mocker.patch('trl.GRPOTrainer.train', return_value=None)
+    mocker.patch('trl.GRPOTrainer.save_model', return_value=None)
+    mocker.patch('src.alignment.pipeline.format_dpo_dataset', return_value=Dataset.from_dict({'prompt': ['a'], 'chosen': ['b'], 'rejected': ['c']}))
+    mocker.patch('src.alignment.pipeline.format_kto_dataset', return_value=Dataset.from_dict({'prompt': ['a'], 'completion': ['b'], 'label': [True]}))
+    mocker.patch('src.alignment.pipeline.format_grpo_dataset', return_value=Dataset.from_dict({'prompt': ['a']}))
+
+    cfg = {
+        "method": "grpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "grpo_out"),
+        "reward_funcs": ["accuracy", "variance"],
+        "epochs": 1,
+        "dataset_path": "dummy_path"
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_kto_with_data(mocker, tmp_path):
+    mocker.patch('trl.KTOTrainer.train', return_value=None)
+    mocker.patch('trl.KTOTrainer.save_model', return_value=None)
+    mocker.patch('src.alignment.pipeline.format_dpo_dataset', return_value=Dataset.from_dict({'prompt': ['a'], 'chosen': ['b'], 'rejected': ['c']}))
+    mocker.patch('src.alignment.pipeline.format_kto_dataset', return_value=Dataset.from_dict({'prompt': ['a'], 'completion': ['b'], 'label': [True]}))
+    mocker.patch('src.alignment.pipeline.format_grpo_dataset', return_value=Dataset.from_dict({'prompt': ['a']}))
+
+    cfg = {
+        "method": "kto",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "kto_out"),
+        "epochs": 1,
+        "dataset_path": "dummy_path"
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_orpo_with_data(mocker, tmp_path):
+    mocker.patch('trl.experimental.orpo.ORPOTrainer.train', return_value=None)
+    mocker.patch('trl.experimental.orpo.ORPOTrainer.save_model', return_value=None)
+    mocker.patch('src.alignment.pipeline.format_dpo_dataset', return_value=Dataset.from_dict({'prompt': ['a'], 'chosen': ['b'], 'rejected': ['c']}))
+    mocker.patch('src.alignment.pipeline.format_kto_dataset', return_value=Dataset.from_dict({'prompt': ['a'], 'completion': ['b'], 'label': [True]}))
+    mocker.patch('src.alignment.pipeline.format_grpo_dataset', return_value=Dataset.from_dict({'prompt': ['a']}))
+
+    cfg = {
+        "method": "orpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "orpo_out"),
+        "epochs": 1,
+        "dataset_path": "dummy_path"
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_cpo_with_data(mocker, tmp_path):
+    mocker.patch('trl.experimental.cpo.CPOTrainer.train', return_value=None)
+    mocker.patch('trl.experimental.cpo.CPOTrainer.save_model', return_value=None)
+    mocker.patch('src.alignment.pipeline.format_dpo_dataset', return_value=Dataset.from_dict({'prompt': ['a'], 'chosen': ['b'], 'rejected': ['c']}))
+    mocker.patch('src.alignment.pipeline.format_kto_dataset', return_value=Dataset.from_dict({'prompt': ['a'], 'completion': ['b'], 'label': [True]}))
+    mocker.patch('src.alignment.pipeline.format_grpo_dataset', return_value=Dataset.from_dict({'prompt': ['a']}))
+
+    cfg = {
+        "method": "cpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "cpo_out"),
+        "epochs": 1,
+        "dataset_path": "dummy_path"
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_no_dataset_path(mocker, tmp_path):
+    mocker.patch('trl.DPOTrainer.train', return_value=None)
+    mocker.patch('trl.DPOTrainer.save_model', return_value=None)
+
+    cfg = {
+        "method": "dpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "dpo_out"),
+        "epochs": 1
+    }
+
+    with pytest.raises(ValueError, match="dataset_path must be provided in config for DPO"):
+        run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_grpo_no_dataset_path(mocker, tmp_path):
+    mocker.patch('trl.GRPOTrainer.train', return_value=None)
+    mocker.patch('trl.GRPOTrainer.save_model', return_value=None)
+
+    cfg = {
+        "method": "grpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "grpo_out"),
+        "epochs": 1
+    }
+
+    with pytest.raises(ValueError, match="dataset_path must be provided in config for GRPO"):
+        run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_kto_no_dataset_path(mocker, tmp_path):
+    mocker.patch('trl.KTOTrainer.train', return_value=None)
+    mocker.patch('trl.KTOTrainer.save_model', return_value=None)
+
+    cfg = {
+        "method": "kto",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "kto_out"),
+        "epochs": 1
+    }
+
+    with pytest.raises(ValueError, match="dataset_path must be provided in config for KTO"):
+        run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_orpo_no_dataset_path(mocker, tmp_path):
+    mocker.patch('trl.experimental.orpo.ORPOTrainer.train', return_value=None)
+    mocker.patch('trl.experimental.orpo.ORPOTrainer.save_model', return_value=None)
+
+    cfg = {
+        "method": "orpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "orpo_out"),
+        "epochs": 1
+    }
+
+    with pytest.raises(ValueError, match="dataset_path must be provided in config for ORPO"):
+        run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_cpo_no_dataset_path(mocker, tmp_path):
+    mocker.patch('trl.experimental.cpo.CPOTrainer.train', return_value=None)
+    mocker.patch('trl.experimental.cpo.CPOTrainer.save_model', return_value=None)
+
+    cfg = {
+        "method": "cpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "cpo_out"),
+        "epochs": 1
+    }
+
+    with pytest.raises(ValueError, match="dataset_path must be provided in config for CPO"):
+        run_alignment_pipeline(cfg, dummy_data=False)

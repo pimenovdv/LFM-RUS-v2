@@ -16,7 +16,7 @@
   - Использовать датасет с парами предпочтений (как в DPO).
   - Интегрировать класс `ORPOTrainer` из библиотеки `trl`.
   - Добавить обработку параметра `method: orpo` в `run_alignment_pipeline`.
-- [ ] **Реализовать CPO (Contrastive Preference Optimization)**
+- [x] **Реализовать CPO (Contrastive Preference Optimization)**
   - Подготовить конфигурацию для использования `CPOTrainer` из `trl` (полезно для генерации кода).
   - Добавить обработку параметра `method: cpo`.
 
