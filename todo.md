@@ -12,7 +12,7 @@
   - Настроить формат датасета для одиночных ответов с бинарной меткой (👍 / 👎).
   - Интегрировать класс `KTOTrainer` из библиотеки `trl`.
   - Добавить обработку параметра `method: kto` в `run_alignment_pipeline`.
-- [ ] **Реализовать ORPO (Odds Ratio Preference Optimization)**
+- [x] **Реализовать ORPO (Odds Ratio Preference Optimization)**
   - Использовать датасет с парами предпочтений (как в DPO).
   - Интегрировать класс `ORPOTrainer` из библиотеки `trl`.
   - Добавить обработку параметра `method: orpo` в `run_alignment_pipeline`.
