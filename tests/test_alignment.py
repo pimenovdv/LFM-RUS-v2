@@ -326,3 +326,24 @@ def test_run_alignment_rejection_sampling_no_dataset_path(mocker, tmp_path):
 
     with pytest.raises(ValueError, match="dataset_path must be provided in config for Rejection Sampling"):
         run_alignment_pipeline(cfg, dummy_data=False)
+
+
+def test_run_alignment_spin_dummy(mocker):
+    cfg = {
+        "method": "spin",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": "./test_spin",
+        "learning_rate": 1e-5,
+        "batch_size": 2,
+        "epochs": 1
+    }
+    mocker.patch("src.alignment.pipeline.DPOTrainer.train")
+    mocker.patch("src.alignment.pipeline.DPOTrainer.save_model")
+    mock_push = mocker.patch("transformers.PreTrainedModel.push_to_hub")
+
+    run_alignment_pipeline(cfg, dummy_data=True)
+
+    from src.alignment.pipeline import DPOTrainer
+    DPOTrainer.train.assert_called_once()
+    DPOTrainer.save_model.assert_called_once()
+    mock_push.assert_not_called()
