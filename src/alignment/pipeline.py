@@ -4,6 +4,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl.experimental.orpo import ORPOTrainer, ORPOConfig
 from trl.experimental.cpo import CPOTrainer, CPOConfig
 from trl import DPOTrainer, DPOConfig, GRPOTrainer, GRPOConfig, KTOTrainer, KTOConfig
+from .rejection_sampling import run_rejection_sampling
 
 def accuracy_reward(prompts: List[str], completions: List[List[Dict[str, str]]], **kwargs) -> List[float]:
     """
@@ -280,8 +281,11 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
 
         trainer.train()
         print("CPO training completed.")
+    elif method in ["rejection_sampling", "rft"]:
+        run_rejection_sampling(cfg, dummy_data)
+        return
     else:
-        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo' or 'cpo'.")
+        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo', 'cpo', 'rejection_sampling' or 'rft'.")
 
 
     trainer.save_model(output_dir)
