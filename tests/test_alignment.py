@@ -1,3 +1,4 @@
+from src.alignment.rejection_sampling import run_rejection_sampling
 from datasets import Dataset
 import pytest
 from src.alignment.pipeline import run_alignment_pipeline, accuracy_reward, variance_reward
@@ -279,4 +280,49 @@ def test_run_alignment_cpo_no_dataset_path(mocker, tmp_path):
     }
 
     with pytest.raises(ValueError, match="dataset_path must be provided in config for CPO"):
+        run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_rejection_sampling_dummy(mocker, tmp_path):
+    mocker.patch('transformers.AutoModelForCausalLM.from_pretrained')
+    mocker.patch('transformers.AutoTokenizer.from_pretrained')
+    mocker.patch('src.alignment.rejection_sampling.pipeline', return_value=lambda *args, **kwargs: [{"generated_text": "text"} for _ in range(kwargs.get('num_return_sequences', 1))])
+    mocker.patch('src.alignment.rejection_sampling.run_sft', return_value=None)
+
+    cfg = {
+        "method": "rejection_sampling",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "rs_out"),
+        "epochs": 1,
+        "num_generations": 2
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=True)
+
+def test_run_alignment_rejection_sampling_with_data(mocker, tmp_path):
+    mocker.patch('transformers.AutoModelForCausalLM.from_pretrained')
+    mocker.patch('transformers.AutoTokenizer.from_pretrained')
+    mocker.patch('src.alignment.rejection_sampling.pipeline', return_value=lambda *args, **kwargs: [{"generated_text": "text"} for _ in range(kwargs.get('num_return_sequences', 1))])
+    mocker.patch('src.alignment.rejection_sampling.run_sft', return_value=None)
+    mocker.patch('src.alignment.rejection_sampling.load_dataset', return_value=Dataset.from_dict({'prompt': ['a', 'b']}))
+
+    cfg = {
+        "method": "rft",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "rs_out"),
+        "epochs": 1,
+        "num_generations": 2,
+        "dataset_path": "dummy_path"
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_rejection_sampling_no_dataset_path(mocker, tmp_path):
+    cfg = {
+        "method": "rejection_sampling",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "rs_out"),
+        "epochs": 1
+    }
+
+    with pytest.raises(ValueError, match="dataset_path must be provided in config for Rejection Sampling"):
         run_alignment_pipeline(cfg, dummy_data=False)
