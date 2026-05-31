@@ -4,6 +4,10 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl.experimental.orpo import ORPOTrainer, ORPOConfig
 from trl.experimental.cpo import CPOTrainer, CPOConfig
 from trl import DPOTrainer, DPOConfig, GRPOTrainer, GRPOConfig, KTOTrainer, KTOConfig
+
+from trl.trainer import RewardTrainer, RewardConfig
+from trl.experimental.ppo import PPOTrainer, PPOConfig
+
 from .rejection_sampling import run_rejection_sampling
 from .spin import run_spin_pipeline
 
@@ -82,7 +86,13 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(model_name)
+
+    if method == "ppo_reward":
+        from transformers import AutoModelForSequenceClassification
+        model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=1)
+    else:
+        model = AutoModelForCausalLM.from_pretrained(model_name)
+
 
     output_dir = cfg.get("output_dir", f"./alignment-{method}-output")
     batch_size = cfg.get("batch_size", 4)
@@ -321,18 +331,127 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         trainer.train()
         print("SPIN training completed.")
 
+
+    elif method == "ppo_reward":
+        print("Starting PPO Reward Model training...")
+        if dummy_data:
+            dataset = Dataset.from_dict({
+                "prompt": ["How to write a function?", "Explain math"],
+                "chosen": ["def func(): pass", "Math is logic"],
+                "rejected": ["func func func func", "math math math"]
+            })
+        else:
+            dataset_path = cfg.get("dataset_path")
+            if not dataset_path:
+                raise ValueError("dataset_path must be provided in config for PPO Reward Model")
+            dataset = format_dpo_dataset(dataset_path)
+
+        reward_config = RewardConfig(
+            output_dir=output_dir,
+            per_device_train_batch_size=batch_size,
+            learning_rate=learning_rate,
+            num_train_epochs=epochs,
+            max_length=cfg.get("max_prompt_length", 512) + cfg.get("max_completion_length", 1024),
+            remove_unused_columns=cfg.get("remove_unused_columns", False),
+            use_cpu=cfg.get("use_cpu", True),
+            bf16=cfg.get("bf16", False),
+            fp16=cfg.get("fp16", False)
+        )
+
+        trainer = RewardTrainer(
+            model=model,
+            args=reward_config,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+        )
+
+        trainer.train()
+        print("PPO Reward Model training completed.")
+
+    elif method == "ppo":
+        print("Starting PPO (RLHF) training...")
+
+        model_name = cfg.get("model_name", "sshleifer/tiny-gpt2")
+
+        if dummy_data:
+            dataset = Dataset.from_dict({
+                "prompt": ["Write a python function that adds two numbers", "Calculate 2 + 2"]
+            })
+        else:
+            dataset_path = cfg.get("dataset_path")
+            if not dataset_path:
+                raise ValueError("dataset_path must be provided in config for PPO")
+            dataset = format_grpo_dataset(dataset_path)
+
+        ppo_model = model
+
+        ppo_config = PPOConfig(
+            output_dir=output_dir,
+            per_device_train_batch_size=batch_size,
+            learning_rate=learning_rate,
+            use_cpu=cfg.get("use_cpu", True),
+            bf16=cfg.get("bf16", False),
+            fp16=cfg.get("fp16", False)
+        )
+
+
+        from transformers import AutoModelForSequenceClassification
+        import torch
+
+        device_map = "auto" if not cfg.get("use_cpu", True) else None
+
+        # Determine reward model path. It should be provided in config, otherwise fallback to model_name but warn.
+        reward_model_path = cfg.get("reward_model_path", model_name)
+        if reward_model_path == model_name:
+            print("Warning: 'reward_model_path' not provided in config, falling back to base model for reward model (randomly initialized head).")
+
+        # Load models with memory management options (quantization, offloading if needed)
+        ref_model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map)
+        reward_model = AutoModelForSequenceClassification.from_pretrained(reward_model_path, num_labels=1, device_map=device_map)
+        value_model = AutoModelForSequenceClassification.from_pretrained(model_name, num_labels=1, device_map=device_map)
+        trainer = PPOTrainer(
+            args=ppo_config,
+            processing_class=tokenizer,
+            model=ppo_model,
+            ref_model=ref_model,
+            reward_model=reward_model,
+            value_model=value_model,
+            train_dataset=dataset,
+        )
+
+        trainer.train()
+        print("PPO training completed.")
+
     elif method in ["rejection_sampling", "rft"]:
         run_rejection_sampling(cfg, dummy_data)
         return
     else:
-        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo', 'cpo', 'spin', 'rejection_sampling' or 'rft'.")
+        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo', 'cpo', 'spin', 'ppo_reward', 'ppo', 'rejection_sampling' or 'rft'.")
 
 
-    trainer.save_model(output_dir)
-    print(f"Model saved to {output_dir}")
+    if hasattr(trainer, "save_model"):
+        trainer.save_model(output_dir)
+        print(f"Model saved to {output_dir}")
+    else:
+        # PPOTrainer in TRL 1.5 doesn't have save_model directly on the trainer object sometimes
+        if hasattr(trainer, "model"):
+            trainer.model.save_pretrained(output_dir)
+        elif hasattr(trainer, "policy"):
+            trainer.policy.save_pretrained(output_dir)
+        tokenizer.save_pretrained(output_dir)
+        print(f"Model saved to {output_dir}")
 
     push_repo = cfg.get("push_to_hub")
     if push_repo:
         print(f"Pushing model to Hub: {push_repo}...")
-        trainer.model.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model")
-        trainer.processing_class.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model") if hasattr(trainer, "processing_class") and trainer.processing_class else trainer.tokenizer.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model") if hasattr(trainer, "tokenizer") and trainer.tokenizer else None
+        if hasattr(trainer, "model"):
+            trainer.model.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model")
+        elif hasattr(trainer, "policy"):
+            trainer.policy.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model")
+
+        if hasattr(trainer, "processing_class") and trainer.processing_class:
+            trainer.processing_class.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model")
+        elif hasattr(trainer, "tokenizer") and trainer.tokenizer:
+            trainer.tokenizer.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model")
+        else:
+            tokenizer.push_to_hub(push_repo, commit_message=f"Upload Alignment ({method}) model")

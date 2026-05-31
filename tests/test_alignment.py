@@ -347,3 +347,35 @@ def test_run_alignment_spin_dummy(mocker):
     DPOTrainer.train.assert_called_once()
     DPOTrainer.save_model.assert_called_once()
     mock_push.assert_not_called()
+
+def test_run_alignment_ppo_reward_dummy(mocker, tmp_path):
+    mocker.patch('trl.trainer.reward_trainer.RewardTrainer.train', return_value=None)
+    mocker.patch('trl.trainer.reward_trainer.RewardTrainer.save_model', return_value=None)
+
+    cfg = {
+        "method": "ppo_reward",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "ppo_reward_out"),
+        "epochs": 1
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=True)
+
+
+def test_run_alignment_ppo_dummy(mocker, tmp_path):
+    mocker.patch('trl.experimental.ppo.PPOTrainer.train', return_value=None)
+    # Let PPOTrainer initialize normally to actually test it, just mock train and save
+    # mock save_model for base trainer if PPOTrainer inherits it
+    try:
+        mocker.patch('trl.experimental.ppo.PPOTrainer.save_model', return_value=None, create=True)
+    except Exception:
+        pass
+
+    cfg = {
+        "method": "ppo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "ppo_out"),
+        "epochs": 1
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=True)
