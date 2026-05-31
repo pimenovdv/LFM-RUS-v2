@@ -1,7 +1,7 @@
 from typing import Dict, Any, List
 from datasets import load_dataset, Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from trl import DPOTrainer, DPOConfig, GRPOTrainer, GRPOConfig
+from trl import DPOTrainer, DPOConfig, GRPOTrainer, GRPOConfig, KTOTrainer, KTOConfig
 
 def accuracy_reward(prompts: List[str], completions: List[List[Dict[str, str]]], **kwargs) -> List[float]:
     """
@@ -52,6 +52,12 @@ def variance_reward(prompts: List[str], completions: List[List[Dict[str, str]]],
 
 def format_dpo_dataset(dataset_path: str, split: str = "train") -> Dataset:
     """Loads and formats a DPO dataset expecting 'prompt', 'chosen', and 'rejected' columns."""
+    dataset = load_dataset(dataset_path, split=split)
+    return dataset
+
+
+def format_kto_dataset(dataset_path: str, split: str = "train") -> Dataset:
+    """Loads and formats a KTO dataset expecting 'prompt', 'completion', and 'label' columns."""
     dataset = load_dataset(dataset_path, split=split)
     return dataset
 
@@ -163,8 +169,45 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         trainer.train()
         print("GRPO training completed.")
 
+    elif method == "kto":
+        print("Starting KTO training...")
+        if dummy_data:
+            dataset = Dataset.from_dict({
+                "prompt": ["Write a function", "Explain math"],
+                "completion": ["def func(): pass", "math math math"],
+                "label": [True, False]
+            })
+        else:
+            dataset_path = cfg.get("dataset_path")
+            if not dataset_path:
+                raise ValueError("dataset_path must be provided in config for KTO")
+            dataset = format_kto_dataset(dataset_path)
+
+        kto_config = KTOConfig(
+            output_dir=output_dir,
+            per_device_train_batch_size=batch_size,
+            learning_rate=learning_rate,
+            num_train_epochs=epochs,
+            max_length=cfg.get("max_prompt_length", 512) + cfg.get("max_completion_length", 1024),
+
+            remove_unused_columns=cfg.get("remove_unused_columns", False),
+            use_cpu=cfg.get("use_cpu", True),
+            bf16=cfg.get("bf16", False),
+            fp16=cfg.get("fp16", False)
+        )
+
+        trainer = KTOTrainer(
+            model=model,
+            args=kto_config,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+        )
+
+        trainer.train()
+        print("KTO training completed.")
+
     else:
-        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo' or 'grpo'.")
+        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto' or 'grpo'.")
 
 
     trainer.save_model(output_dir)
