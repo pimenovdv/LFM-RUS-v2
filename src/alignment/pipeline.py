@@ -10,6 +10,7 @@ from trl.experimental.ppo import PPOTrainer, PPOConfig
 
 from .rejection_sampling import run_rejection_sampling
 from .spin import run_spin_pipeline
+from .rlaif import run_rlaif_pipeline
 
 def accuracy_reward(prompts: List[str], completions: List[List[Dict[str, str]]], **kwargs) -> List[float]:
     """
@@ -422,11 +423,43 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         trainer.train()
         print("PPO training completed.")
 
+
+    elif method == "rlaif":
+        print("Starting RLAIF (Constitutional AI) pipeline...")
+        rlaif_dataset_path = run_rlaif_pipeline(cfg, model, tokenizer, dummy_data=dummy_data)
+
+        # After generating data, we do DPO by default as per the instructions/standard pipeline
+        print("Continuing with DPO on generated RLAIF dataset...")
+        dataset = load_dataset("json", data_files=rlaif_dataset_path, split="train")
+
+        dpo_config = DPOConfig(
+            output_dir=output_dir,
+            per_device_train_batch_size=batch_size,
+            learning_rate=learning_rate,
+            num_train_epochs=epochs,
+            max_length=cfg.get("max_prompt_length", 512) + cfg.get("max_completion_length", 1024),
+            remove_unused_columns=cfg.get("remove_unused_columns", False),
+            use_cpu=cfg.get("use_cpu", True),
+            bf16=cfg.get("bf16", False),
+            fp16=cfg.get("fp16", False)
+        )
+
+        trainer = DPOTrainer(
+            model=model,
+            ref_model=None,
+            args=dpo_config,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+        )
+
+        trainer.train()
+        print("RLAIF (Constitutional AI) training completed via DPO.")
+
     elif method in ["rejection_sampling", "rft"]:
         run_rejection_sampling(cfg, dummy_data)
         return
     else:
-        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo', 'cpo', 'spin', 'ppo_reward', 'ppo', 'rejection_sampling' or 'rft'.")
+        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo', 'cpo', 'spin', 'ppo_reward', 'ppo', 'rejection_sampling', 'rft' or 'rlaif'.")
 
 
     if hasattr(trainer, "save_model"):
