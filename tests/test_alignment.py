@@ -283,8 +283,8 @@ def test_run_alignment_cpo_no_dataset_path(mocker, tmp_path):
         run_alignment_pipeline(cfg, dummy_data=False)
 
 def test_run_alignment_rejection_sampling_dummy(mocker, tmp_path):
-    mocker.patch('transformers.AutoModelForCausalLM.from_pretrained')
-    mocker.patch('transformers.AutoTokenizer.from_pretrained')
+
+
     mocker.patch('src.alignment.rejection_sampling.pipeline', return_value=lambda *args, **kwargs: [{"generated_text": "text"} for _ in range(kwargs.get('num_return_sequences', 1))])
     mocker.patch('src.alignment.rejection_sampling.run_sft', return_value=None)
 
@@ -299,8 +299,8 @@ def test_run_alignment_rejection_sampling_dummy(mocker, tmp_path):
     run_alignment_pipeline(cfg, dummy_data=True)
 
 def test_run_alignment_rejection_sampling_with_data(mocker, tmp_path):
-    mocker.patch('transformers.AutoModelForCausalLM.from_pretrained')
-    mocker.patch('transformers.AutoTokenizer.from_pretrained')
+
+
     mocker.patch('src.alignment.rejection_sampling.pipeline', return_value=lambda *args, **kwargs: [{"generated_text": "text"} for _ in range(kwargs.get('num_return_sequences', 1))])
     mocker.patch('src.alignment.rejection_sampling.run_sft', return_value=None)
     mocker.patch('src.alignment.rejection_sampling.load_dataset', return_value=Dataset.from_dict({'prompt': ['a', 'b']}))
@@ -379,3 +379,89 @@ def test_run_alignment_ppo_dummy(mocker, tmp_path):
     }
 
     run_alignment_pipeline(cfg, dummy_data=True)
+
+def test_run_rlaif_pipeline_dummy(mocker, tmp_path):
+
+
+
+    # Mock text generation to return 2 responses
+    def mock_generate_responses(model, tokenizer, prompts, n, max_length):
+        return [["Response A for " + p, "Response B for " + p] for p in prompts]
+
+    mocker.patch('src.alignment.rlaif.generate_responses', side_effect=mock_generate_responses)
+
+    # Mock the LLM judge evaluation to return "A" or "B"
+    class MockMessage:
+        def __init__(self, content):
+            self.content = content
+    class MockChoice:
+        def __init__(self, content):
+            self.message = MockMessage(content)
+    class MockResponse:
+        def __init__(self, content):
+            self.choices = [MockChoice(content)]
+
+    class MockCompletions:
+        def create(self, **kwargs):
+            import json
+            return MockResponse(json.dumps({"preference": "B"}))
+
+    class MockChat:
+        def __init__(self):
+            self.completions = MockCompletions()
+
+    class MockClient:
+        def __init__(self, **kwargs):
+            self.chat = MockChat()
+
+    mocker.patch('src.alignment.rlaif.OpenAI', MockClient)
+
+    # Mock the DPO training that happens after generation
+    mocker.patch('trl.DPOTrainer.train', return_value=None)
+
+    from src.alignment.pipeline import run_alignment_pipeline
+    import os
+    import json
+
+    output_dir = str(tmp_path / "rlaif_out")
+    cfg = {
+        "method": "rlaif",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": output_dir,
+        "epochs": 1,
+        "openai_api_key": "dummy_key"
+    }
+
+    run_alignment_pipeline(cfg, dummy_data=True)
+
+    generated_data_path = os.path.join(output_dir, "rlaif_dataset.jsonl")
+    assert os.path.exists(generated_data_path)
+
+    with open(generated_data_path, "r") as f:
+        lines = f.readlines()
+        assert len(lines) == 3 # 3 dummy prompts
+
+        first_item = json.loads(lines[0])
+        assert "prompt" in first_item
+        assert "chosen" in first_item
+        assert "rejected" in first_item
+
+        # Since judge mocked to return "B", chosen should be Response B
+        assert "Response B" in first_item["chosen"]
+        assert "Response A" in first_item["rejected"]
+
+
+def test_run_rlaif_pipeline_no_dataset(mocker, tmp_path):
+    mocker.patch('src.alignment.rlaif.OpenAI')
+    from src.alignment.pipeline import run_alignment_pipeline
+
+    cfg = {
+        "method": "rlaif",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "rlaif_out"),
+        "epochs": 1,
+        "openai_api_key": "dummy"
+    }
+
+    with pytest.raises(ValueError, match="dataset_path must be provided in config for RLAIF"):
+        run_alignment_pipeline(cfg, dummy_data=False)
