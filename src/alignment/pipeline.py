@@ -5,6 +5,7 @@ from trl.experimental.orpo import ORPOTrainer, ORPOConfig
 from trl.experimental.cpo import CPOTrainer, CPOConfig
 from trl import DPOTrainer, DPOConfig, GRPOTrainer, GRPOConfig, KTOTrainer, KTOConfig
 from .rejection_sampling import run_rejection_sampling
+from .spin import run_spin_pipeline
 
 def accuracy_reward(prompts: List[str], completions: List[List[Dict[str, str]]], **kwargs) -> List[float]:
     """
@@ -281,11 +282,50 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
 
         trainer.train()
         print("CPO training completed.")
+
+    elif method == "spin":
+        print("Starting SPIN (Self-Play Fine-Tuning) training...")
+        if dummy_data:
+            dataset = Dataset.from_dict({
+                "prompt": ["What is 2+2?", "Write a function.", "Explain math"],
+                "chosen": ["It is 4.", "def func(): pass", "Math is logic."]
+            })
+            spin_dataset_path = run_spin_pipeline(cfg, model, tokenizer, dummy_data=True)
+            dataset = load_dataset("json", data_files=spin_dataset_path, split="train")
+        else:
+            # First generate the rejected responses
+            spin_dataset_path = run_spin_pipeline(cfg, model, tokenizer, dummy_data=False)
+            dataset = load_dataset("json", data_files=spin_dataset_path, split="train")
+
+        spin_config = DPOConfig(
+            output_dir=output_dir,
+            per_device_train_batch_size=batch_size,
+            learning_rate=learning_rate,
+            num_train_epochs=epochs,
+            loss_type="sigmoid",
+            max_length=cfg.get("max_prompt_length", 512) + cfg.get("max_completion_length", 1024),
+            remove_unused_columns=cfg.get("remove_unused_columns", False),
+            use_cpu=cfg.get("use_cpu", True), # to avoid bf16 errors on test instances
+            bf16=cfg.get("bf16", False),
+            fp16=cfg.get("fp16", False)
+        )
+
+        trainer = DPOTrainer(
+            model=model,
+            ref_model=None, # TRL will create a reference model automatically if None
+            args=spin_config,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+        )
+
+        trainer.train()
+        print("SPIN training completed.")
+
     elif method in ["rejection_sampling", "rft"]:
         run_rejection_sampling(cfg, dummy_data)
         return
     else:
-        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo', 'cpo', 'rejection_sampling' or 'rft'.")
+        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo', 'cpo', 'spin', 'rejection_sampling' or 'rft'.")
 
 
     trainer.save_model(output_dir)
