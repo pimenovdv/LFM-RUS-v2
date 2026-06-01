@@ -1,3 +1,4 @@
+import os
 from typing import Dict, Any, List
 from datasets import load_dataset, Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -11,6 +12,7 @@ from trl.experimental.ppo import PPOTrainer, PPOConfig
 from .rejection_sampling import run_rejection_sampling
 from .spin import run_spin_pipeline
 from .rlaif import run_rlaif_pipeline
+from .iterative_dpo import run_iterative_dpo_iteration
 
 def accuracy_reward(prompts: List[str], completions: List[List[Dict[str, str]]], **kwargs) -> List[float]:
     """
@@ -455,11 +457,47 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         trainer.train()
         print("RLAIF (Constitutional AI) training completed via DPO.")
 
+
+    elif method == "iterative_dpo":
+        print("Starting Iterative DPO pipeline...")
+        num_iterations = cfg.get("num_iterations", 2)
+
+        for iteration in range(num_iterations):
+            print(f"--- Iteration {iteration + 1}/{num_iterations} ---")
+            dataset_path = run_iterative_dpo_iteration(cfg, model, tokenizer, iteration, dummy_data=dummy_data)
+            dataset = load_dataset("json", data_files=dataset_path, split="train")
+
+            iter_output_dir = os.path.join(output_dir, f"iter_{iteration}")
+            dpo_config = DPOConfig(
+                output_dir=iter_output_dir,
+                per_device_train_batch_size=batch_size,
+                learning_rate=learning_rate,
+                num_train_epochs=epochs,
+                max_length=cfg.get("max_prompt_length", 512) + cfg.get("max_completion_length", 1024),
+                remove_unused_columns=cfg.get("remove_unused_columns", False),
+                use_cpu=cfg.get("use_cpu", True),
+                bf16=cfg.get("bf16", False),
+                fp16=cfg.get("fp16", False)
+            )
+
+            trainer = DPOTrainer(
+                model=model,
+                ref_model=None,
+                args=dpo_config,
+                train_dataset=dataset,
+                processing_class=tokenizer,
+            )
+
+            trainer.train()
+            print(f"Iteration {iteration + 1} DPO training completed.")
+
+        print("Iterative DPO training completed.")
+
     elif method in ["rejection_sampling", "rft"]:
         run_rejection_sampling(cfg, dummy_data)
         return
     else:
-        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo', 'cpo', 'spin', 'ppo_reward', 'ppo', 'rejection_sampling', 'rft' or 'rlaif'.")
+        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo', 'cpo', 'spin', 'ppo_reward', 'ppo', 'rejection_sampling', 'rft', 'rlaif' or 'iterative_dpo'.")
 
 
     if hasattr(trainer, "save_model"):
