@@ -25,7 +25,7 @@ def cli():
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to tokenizer configuration YAML.')
 @click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
-def tokenizer(config, dummy_data):
+def tokenizer(config: str, dummy_data: bool):
     """Run Tokenizer Training & FOCUS stage."""
     cfg = load_config(config)
     click.echo(f"Starting Tokenizer stage with config: {cfg}")
@@ -133,7 +133,7 @@ def tokenizer(config, dummy_data):
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to pruning configuration YAML.')
 @click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
-def prune(config, dummy_data):
+def prune(config: str, dummy_data: bool):
     """Run Tokenizer Pruning & Optimization stage."""
     cfg = load_config(config)
     click.echo(f"Starting Pruning stage with config: {cfg}")
@@ -167,7 +167,7 @@ def prune(config, dummy_data):
 
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to data prep configuration YAML.')
-def data_prep(config):
+def data_prep(config: str):
     """Run Data Deduplication (MinHash LSH) stage."""
     cfg = load_config(config)
     click.echo(f"Starting Data Prep stage with config: {cfg}")
@@ -176,7 +176,7 @@ def data_prep(config):
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to CPT configuration YAML.')
 @click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
-def cpt(config, dummy_data):
+def cpt(config: str, dummy_data: bool):
     """Run Continual Pre-Training (CPT) stage."""
     cfg = load_config(config)
     click.echo(f"Starting Continual Pre-Training (CPT) stage with config: {cfg}")
@@ -185,7 +185,7 @@ def cpt(config, dummy_data):
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to SFT configuration YAML.')
 @click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
-def sft(config, dummy_data):
+def sft(config: str, dummy_data: bool):
     """Run Supervised Fine-Tuning (General SFT) stage."""
     cfg = load_config(config)
     click.echo(f"Starting Supervised Fine-Tuning (General SFT) stage with config: {cfg}")
@@ -194,7 +194,7 @@ def sft(config, dummy_data):
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to alignment configuration YAML.')
 @click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
-def alignment(config, dummy_data):
+def alignment(config: str, dummy_data: bool):
     """Run Alignment (DPO/GRPO) stage."""
     cfg = load_config(config)
     click.echo(f"Starting Alignment stage with config: {cfg}")
@@ -203,7 +203,7 @@ def alignment(config, dummy_data):
 @cli.command()
 @click.option('--config', required=True, type=click.Path(exists=True), help='Path to task SFT configuration YAML.')
 @click.option('--dummy-data', is_flag=True, help='Use simple hardcoded list for fast testing.')
-def task_sft(config, dummy_data):
+def task_sft(config: str, dummy_data: bool):
     """Run Final Task SFT stage."""
     cfg = load_config(config)
     click.echo(f"Starting Final Task SFT stage with config: {cfg}")
