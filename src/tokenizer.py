@@ -7,8 +7,19 @@ from tokenizers.pre_tokenizers import Digits, Whitespace, Sequence
 from tokenizers.trainers import BpeTrainer
 import fasttext
 from entmax import sparsemax
+from typing import Iterator, List, Dict, Any, Tuple, Optional
 
-def build_tokenizer(data_iterator, vocab_size=5000):
+def build_tokenizer(data_iterator: Iterator[str], vocab_size: int = 5000) -> Tokenizer:
+    """
+    Обучает новый BPE токенизатор на основе переданных данных.
+
+    Args:
+        data_iterator (Iterator[str]): Итератор по текстовым данным для обучения.
+        vocab_size (int, optional): Целевой размер словаря. По умолчанию 5000.
+
+    Returns:
+        Tokenizer: Обученный токенизатор.
+    """
     tokenizer = Tokenizer(BPE(unk_token="<unk>"))
     tokenizer.pre_tokenizer = Sequence([
         Whitespace(),
@@ -18,7 +29,27 @@ def build_tokenizer(data_iterator, vocab_size=5000):
     tokenizer.train_from_iterator(data_iterator, trainer=trainer)
     return tokenizer
 
-def run_lexical_initialization(model_name, new_tokens, config, fasttext_model_path=None, save_path="./lfm-russian-lexical"):
+def run_lexical_initialization(
+    model_name: str,
+    new_tokens: List[str],
+    config: Dict[str, Any],
+    fasttext_model_path: Optional[str] = None,
+    save_path: Optional[str] = "./lfm-russian-lexical"
+) -> Tuple[AutoTokenizer, AutoModelForCausalLM]:
+    """
+    Выполняет лексическую инициализацию (добавление новых токенов и инициализацию их эмбеддингов).
+    Использует перевод (translation_dict), подход FOCUS (sparsemax поверх fasttext эмбеддингов) или fallback (среднее).
+
+    Args:
+        model_name (str): Имя или путь к базовой модели (например, на HuggingFace).
+        new_tokens (List[str]): Список новых токенов для добавления в словарь.
+        config (Dict[str, Any]): Словарь конфигурации (содержит настройки use_translation_init, translation_dict).
+        fasttext_model_path (Optional[str]): Путь к обученной модели fastText для инициализации FOCUS.
+        save_path (Optional[str]): Путь для сохранения модели и токенизатора после инициализации.
+
+    Returns:
+        Tuple[AutoTokenizer, AutoModelForCausalLM]: Обновленный токенизатор и модель.
+    """
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name)
 

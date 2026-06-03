@@ -5,8 +5,27 @@ from collections import Counter
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from tqdm import tqdm
 import os
+from typing import List, Dict, Any, Tuple
 
-def prune_tokenizer_and_model(model_name, dataset, min_freq, output_dir):
+def prune_tokenizer_and_model(
+    model_name: str,
+    dataset: List[Dict[str, Any]],
+    min_freq: int,
+    output_dir: str
+) -> Tuple[AutoTokenizer, AutoModelForCausalLM]:
+    """
+    Уменьшает размер словаря токенизатора и соответствующих эмбеддингов модели,
+    оставляя только токены, встречающиеся не реже min_freq раз в dataset.
+
+    Args:
+        model_name (str): Имя или путь к базовой модели (на HuggingFace).
+        dataset (List[Dict[str, Any]]): Датасет, на котором считаются частоты токенов. Должен содержать поле 'text' или 'content'.
+        min_freq (int): Минимальная частота встречаемости токена для его сохранения.
+        output_dir (str): Директория для сохранения урезанной модели и токенизатора.
+
+    Returns:
+        Tuple[AutoTokenizer, AutoModelForCausalLM]: Обновленный токенизатор и модель.
+    """
     print("1. Loading model and tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(model_name, trust_remote_code=True)
