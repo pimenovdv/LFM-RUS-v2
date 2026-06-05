@@ -61,9 +61,13 @@ def run_rejection_sampling(cfg: Dict[str, Any], dummy_data: bool = False):
 
     best_completions = []
     print("Evaluating responses...")
-    reward_fn = get_reward_function(reward_func)
+    reward_fn = get_reward_function(reward_func, cfg.get("reward_config", {}))
     for prompt, completions in zip(prompts, all_completions):
-        scores = reward_fn(completions)
+        try:
+            scores = reward_fn(completions, [prompt] * len(completions))
+        except TypeError:
+            # Fallback for older reward functions that don't accept prompts
+            scores = reward_fn(completions)
         best_idx = scores.index(max(scores))
         best_completions.append({"prompt": prompt, "completion": completions[best_idx]})
 
