@@ -47,7 +47,7 @@ def run_rejection_sampling(cfg: Dict[str, Any], dummy_data: bool = False):
     model = AutoModelForCausalLM.from_pretrained(model_name)
 
     if dummy_data:
-        prompts = ["What is 2+2?", "Write a function.", "Explain math"]
+        prompts = ["What is 2+2?", "Write a function.", "Explain math"] * 10
     else:
         dataset_path = cfg.get("dataset_path")
         if not dataset_path:

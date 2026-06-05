@@ -32,7 +32,7 @@ def tokenizer(config: str, dummy_data: bool):
 
     if dummy_data:
         click.echo("Using simple dummy list for tokenizer training...")
-        data_iterator = ["print('Hello')", "12345", "кошка сидит", "neural network"]
+        data_iterator = ["print('Hello')", "12345", "кошка сидит", "neural network"] * 100
     else:
         click.echo("Streaming datasets based on config ratios and interleaving...")
         ratios = cfg.get("dataset_ratios", {"ru": 0.40, "en": 0.30, "code": 0.15, "math": 0.15})
@@ -147,7 +147,7 @@ def prune(config: str, dummy_data: bool):
 
     if dummy_data:
         click.echo("Using simple dummy dataset for pruning...")
-        dataset = [{"text": "hello world"}, {"text": "hello python"}, {"text": "кошка"}]
+        dataset = [{"text": "hello world"}, {"text": "hello python"}, {"text": "кошка"}] * 100
     else:
         # Load dataset according to your actual config logic
         dataset_path = cfg.get("dataset_path")

@@ -439,7 +439,7 @@ def test_run_rlaif_pipeline_dummy(mocker, tmp_path):
 
     with open(generated_data_path, "r") as f:
         lines = f.readlines()
-        assert len(lines) == 3 # 3 dummy prompts
+        assert len(lines) == 30 # 3 dummy prompts
 
         first_item = json.loads(lines[0])
         assert "prompt" in first_item

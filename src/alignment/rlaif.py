@@ -93,7 +93,7 @@ def run_rlaif_pipeline(cfg: Dict[str, Any], model, tokenizer, dummy_data: bool =
 
     if dummy_data:
         dataset = Dataset.from_dict({
-            "prompt": ["What is 2+2?", "Write a function.", "Explain math"]
+            "prompt": ["What is 2+2?", "Write a function.", "Explain math"] * 10
         })
     else:
         dataset_path = cfg.get("dataset_path")
