@@ -465,3 +465,18 @@ def test_run_rlaif_pipeline_no_dataset(mocker, tmp_path):
 
     with pytest.raises(ValueError, match="dataset_path must be provided in config for RLAIF"):
         run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_ppo_no_reward_model_path(mocker, tmp_path):
+    mocker.patch('trl.experimental.ppo.PPOTrainer.train', return_value=None)
+    mocker.patch('src.alignment.pipeline.format_grpo_dataset', return_value=Dataset.from_dict({'prompt': ['a']}))
+
+    cfg = {
+        "method": "ppo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "ppo_out"),
+        "epochs": 1,
+        "dataset_path": "dummy_path"
+    }
+
+    with pytest.raises(ValueError, match="reward_model_path must be provided in config for PPO"):
+        run_alignment_pipeline(cfg, dummy_data=False)
