@@ -403,10 +403,14 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
 
         device_map = "auto" if not cfg.get("use_cpu", True) else None
 
-        # Determine reward model path. It should be provided in config, otherwise fallback to model_name but warn.
-        reward_model_path = cfg.get("reward_model_path", model_name)
-        if reward_model_path == model_name:
-            print("Warning: 'reward_model_path' not provided in config, falling back to base model for reward model (randomly initialized head).")
+        # Determine reward model path. It should be provided in config.
+        reward_model_path = cfg.get("reward_model_path")
+        if not reward_model_path:
+            if dummy_data:
+                reward_model_path = model_name
+                print("Warning: 'reward_model_path' not provided in config, falling back to base model for reward model (randomly initialized head).")
+            else:
+                raise ValueError("reward_model_path must be provided in config for PPO")
 
         # Load models with memory management options (quantization, offloading if needed)
         ref_model = AutoModelForCausalLM.from_pretrained(model_name, device_map=device_map)
