@@ -106,9 +106,9 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         print(f"Starting {method.upper()} training...")
         if dummy_data:
             dataset = Dataset.from_dict({
-                "prompt": ["How to write a function?", "Explain math"],
-                "chosen": ["def func(): pass", "Math is logic"],
-                "rejected": ["func func func func", "math math math"]
+                "prompt": ["How to write a function?", "Explain math"] * 10,
+                "chosen": ["def func(): pass", "Math is logic"] * 10,
+                "rejected": ["func func func func", "math math math"] * 10
             })
         else:
             dataset_path = cfg.get("dataset_path")
@@ -144,7 +144,7 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         print("Starting GRPO (RLVR) training...")
         if dummy_data:
             dataset = Dataset.from_dict({
-                "prompt": ["Write a python function that adds two numbers", "Calculate 2 + 2"]
+                "prompt": ["Write a python function that adds two numbers", "Calculate 2 + 2"] * 10
             })
         else:
             dataset_path = cfg.get("dataset_path")
@@ -190,9 +190,9 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         print("Starting KTO training...")
         if dummy_data:
             dataset = Dataset.from_dict({
-                "prompt": ["Write a function", "Explain math"],
-                "completion": ["def func(): pass", "math math math"],
-                "label": [True, False]
+                "prompt": ["Write a function", "Explain math"] * 10,
+                "completion": ["def func(): pass", "math math math"] * 10,
+                "label": [True, False] * 10
             })
         else:
             dataset_path = cfg.get("dataset_path")
@@ -228,9 +228,9 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         print("Starting ORPO training...")
         if dummy_data:
             dataset = Dataset.from_dict({
-                "prompt": ["How to write a function?", "Explain math"],
-                "chosen": ["def func(): pass", "Math is logic"],
-                "rejected": ["func func func func", "math math math"]
+                "prompt": ["How to write a function?", "Explain math"] * 10,
+                "chosen": ["def func(): pass", "Math is logic"] * 10,
+                "rejected": ["func func func func", "math math math"] * 10
             })
         else:
             dataset_path = cfg.get("dataset_path")
@@ -264,9 +264,9 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         print("Starting CPO training...")
         if dummy_data:
             dataset = Dataset.from_dict({
-                "prompt": ["How to write a function?", "Explain math"],
-                "chosen": ["def func(): pass", "Math is logic"],
-                "rejected": ["func func func func", "math math math"]
+                "prompt": ["How to write a function?", "Explain math"] * 10,
+                "chosen": ["def func(): pass", "Math is logic"] * 10,
+                "rejected": ["func func func func", "math math math"] * 10
             })
         else:
             dataset_path = cfg.get("dataset_path")
@@ -299,10 +299,6 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
     elif method == "spin":
         print("Starting SPIN (Self-Play Fine-Tuning) training...")
         if dummy_data:
-            dataset = Dataset.from_dict({
-                "prompt": ["What is 2+2?", "Write a function.", "Explain math"],
-                "chosen": ["It is 4.", "def func(): pass", "Math is logic."]
-            })
             spin_dataset_path = run_spin_pipeline(cfg, model, tokenizer, dummy_data=True)
             dataset = load_dataset("json", data_files=spin_dataset_path, split="train")
         else:
@@ -339,9 +335,9 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         print("Starting PPO Reward Model training...")
         if dummy_data:
             dataset = Dataset.from_dict({
-                "prompt": ["How to write a function?", "Explain math"],
-                "chosen": ["def func(): pass", "Math is logic"],
-                "rejected": ["func func func func", "math math math"]
+                "prompt": ["How to write a function?", "Explain math"] * 10,
+                "chosen": ["def func(): pass", "Math is logic"] * 10,
+                "rejected": ["func func func func", "math math math"] * 10
             })
         else:
             dataset_path = cfg.get("dataset_path")
@@ -378,7 +374,7 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
 
         if dummy_data:
             dataset = Dataset.from_dict({
-                "prompt": ["Write a python function that adds two numbers", "Calculate 2 + 2"]
+                "prompt": ["Write a python function that adds two numbers", "Calculate 2 + 2"] * 10
             })
         else:
             dataset_path = cfg.get("dataset_path")

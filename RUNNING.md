@@ -30,6 +30,8 @@ uv run python main.py tokenizer --config configs/tokenizer.yaml
 *Для быстрого тестирования используйте флаг `--dummy-data`:*
 ```bash
 uv run python main.py tokenizer --config configs/tokenizer.yaml --dummy-data
+
+*Примечание:* При использовании `dummy_data` загружаются минимальные функциональные датасеты, которые не ломают логику пайплайна (например, содержат правильные колонки `prompt`, `chosen`, `rejected`).
 ```
 
 ### 2. Прунинг
