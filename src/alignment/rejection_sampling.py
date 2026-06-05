@@ -1,3 +1,4 @@
+from src.alignment.rewards.rewards import get_reward_function
 import json
 import logging
 import os
@@ -29,17 +30,6 @@ def generate_responses(model, tokenizer, prompts: List[str], n: int, max_length:
 
     return all_responses
 
-def evaluate_responses(completions: List[str], reward_func_name: str) -> List[float]:
-    rewards = []
-    for text in completions:
-        if reward_func_name == "accuracy":
-            if "<solution>" in text:
-                rewards.append(1.0)
-            else:
-                rewards.append(0.0)
-        else:
-            rewards.append(len(text) * 0.01)  # dummy default reward
-    return rewards
 
 def run_rejection_sampling(cfg: Dict[str, Any], dummy_data: bool = False):
     print("Starting Rejection Sampling (Best-of-N) pipeline...")
@@ -71,8 +61,9 @@ def run_rejection_sampling(cfg: Dict[str, Any], dummy_data: bool = False):
 
     best_completions = []
     print("Evaluating responses...")
+    reward_fn = get_reward_function(reward_func)
     for prompt, completions in zip(prompts, all_completions):
-        scores = evaluate_responses(completions, reward_func)
+        scores = reward_fn(completions)
         best_idx = scores.index(max(scores))
         best_completions.append({"prompt": prompt, "completion": completions[best_idx]})
 
