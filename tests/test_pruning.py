@@ -42,8 +42,6 @@ def test_prune_tokenizer_and_model_reduces_vocab_size():
         # Cleanup
         if os.path.exists(output_dir):
             shutil.rmtree(output_dir)
-        if os.path.exists("./temp_tokenizer_pruning"):
-            shutil.rmtree("./temp_tokenizer_pruning")
 
 if __name__ == "__main__":
     test_prune_tokenizer_and_model_reduces_vocab_size()
