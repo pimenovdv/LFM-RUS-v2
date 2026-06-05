@@ -97,9 +97,12 @@ def tokenizer(config: str, dummy_data: bool):
     new_ru_tokens = [tok for tok in new_vocab if tok not in base_vocab and not tok.startswith("<")]
 
     if len(new_ru_tokens) == 0:
-        click.echo("Warning: No strictly new tokens found. Ensure you are training on new data.")
-        # fallback for dummy testing
-        new_ru_tokens = ["Ġкошка", "Ġсобака"]
+        if dummy_data:
+            click.echo("Warning: No strictly new tokens found. Using fallback for dummy testing.")
+            new_ru_tokens = ["Ġкошка", "Ġсобака"]
+        else:
+            click.echo("Warning: No strictly new tokens found. Skipping lexical initialization as no new tokens need to be added.")
+            return
 
     click.echo(f"Found {len(new_ru_tokens)} new tokens to initialize.")
 
