@@ -10,7 +10,7 @@
   * Создать `DiffusionConfig` (наследуется от `PretrainedConfig`). Добавить параметры: `mask_token_id`, `diffusion_steps`, `remasking_strategy`, `block_size`. Указать `model_type="lfm_masked_diffusion"` и игнорируемые ключи (например, `past_key_values`).
   * Добавить интеграцию с механизмом Hugging Face `AutoClasses`: `DiffusionConfig.register_for_auto_class()`.
 
-## [ ] Шаг 2: Класс модели и алгоритм генерации (Diffusion Model & Generation)
+## [x] Шаг 2: Класс модели и алгоритм генерации (Diffusion Model & Generation)
 **Цель:** Реализовать основной класс диффузионной модели и кастомный метод итеративного демаскирования для инференса.
 * **Детали реализации:**
   * Создать `DiffusionModelForConditionalGeneration` (наследуется от `PreTrainedModel`). Включает в себя Embeddings, слои трансформера с новым вниманием и LM Head.
