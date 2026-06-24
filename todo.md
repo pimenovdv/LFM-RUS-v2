@@ -23,7 +23,7 @@
   * Оптимизация инференса: внедрение Ascending Step-Size (ASS) и EOS Early Rejection (EOSER). Реализовать block-wise сэмплирование с повторным использованием KV-кэша.
   * Регистрация модели `DiffusionModelForConditionalGeneration.register_for_auto_class("AutoModelForCausalLM")` и регистрация в локальной сессии (`AutoConfig.register`, `AutoModelForCausalLM.register`).
 
-## [ ] Шаг 3: CPT пайплайн и WSD-обучение с Block Diffusion
+## [x] Шаг 3: CPT пайплайн и WSD-обучение с Block Diffusion
 **Цель:** Адаптировать этап Continual Pre-Training для перевода AR-модели в базовую диффузионную (Base Diffusion).
 * **Детали реализации:**
   * Внедрить поддержку расписания Warmup-Stable-Decay (WSD) со сверхнизким learning rate на этапе warmup для смягчения дрейфа весов.
