@@ -4,7 +4,82 @@ from transformers import AutoTokenizer, AutoModelForCausalLM, Trainer, TrainingA
 
 logger = logging.getLogger(__name__)
 
+
+import os
+import glob
+import torch
+import safetensors.torch
+
+def merge_top_k_checkpoints(output_dir: str, k: int):
+    logger.info(f"Merging top {k} checkpoints from {output_dir}")
+    checkpoints = glob.glob(os.path.join(output_dir, "checkpoint-*"))
+    if not checkpoints:
+        logger.warning("No checkpoints found to merge.")
+        return
+
+    # Sort checkpoints by step number
+    checkpoints.sort(key=lambda x: int(x.split("-")[-1]))
+    top_k_checkpoints = checkpoints[-k:]
+
+    if len(top_k_checkpoints) < k:
+        logger.warning(f"Requested to merge {k} checkpoints but only found {len(top_k_checkpoints)}.")
+
+    merged_state_dict = {}
+    num_ckpts = len(top_k_checkpoints)
+
+    for ckpt_dir in top_k_checkpoints:
+        logger.info(f"Loading checkpoint: {ckpt_dir}")
+        model_file = os.path.join(ckpt_dir, "model.safetensors")
+        if os.path.exists(model_file):
+            state_dict = safetensors.torch.load_file(model_file)
+        else:
+            model_file = os.path.join(ckpt_dir, "pytorch_model.bin")
+            if os.path.exists(model_file):
+                state_dict = torch.load(model_file, map_location="cpu", weights_only=True)
+            else:
+                logger.error(f"No valid model weights found in {ckpt_dir}")
+                continue
+
+        for key, tensor in state_dict.items():
+            if key not in merged_state_dict:
+                merged_state_dict[key] = tensor.clone().to(torch.float32) / num_ckpts
+            else:
+                merged_state_dict[key] += tensor.to(torch.float32) / num_ckpts
+
+    merged_dir = os.path.join(output_dir, "merged_model")
+    os.makedirs(merged_dir, exist_ok=True)
+    safetensors.torch.save_file(merged_state_dict, os.path.join(merged_dir, "model.safetensors"))
+    logger.info(f"Merged model saved to {merged_dir}")
+
+
+class BlockDiffusionDataCollator(DataCollatorForLanguageModeling):
+    def __init__(self, block_size, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.block_size = block_size
+
+    def __call__(self, examples, return_tensors=None):
+        batch = super().__call__(examples, return_tensors)
+        seq_length = batch["input_ids"].shape[1]
+        batch_size = batch["input_ids"].shape[0]
+
+        # Ensure seq_length is a multiple of block_size, or just use block_size
+        mask = torch.zeros((batch_size, 1, seq_length, seq_length), dtype=torch.float32)
+
+        num_blocks = (seq_length + self.block_size - 1) // self.block_size
+        for i in range(num_blocks):
+            for j in range(num_blocks):
+                if j <= i:
+                    start_i = i * self.block_size
+                    end_i = min((i + 1) * self.block_size, seq_length)
+                    start_j = j * self.block_size
+                    end_j = min((j + 1) * self.block_size, seq_length)
+                    mask[:, :, start_i:end_i, start_j:end_j] = 1.0
+
+        batch["attention_mask"] = mask
+        return batch
+
 def run_cpt(cfg, dummy_data):
+
     model_name = cfg.get("model_name", "sshleifer/tiny-gpt2")
     max_seq_length = cfg.get("max_seq_length", 512)
 
@@ -88,6 +163,20 @@ def run_cpt(cfg, dummy_data):
     print(f"Initializing model {model_name}...")
     model = AutoModelForCausalLM.from_pretrained(model_name)
 
+    # WSD configuration
+    wsd_cfg = cfg.get("wsd", {})
+    if wsd_cfg.get("enabled", False):
+        training_args_kwargs = {
+            "lr_scheduler_type": "warmup_stable_decay",
+            "lr_scheduler_kwargs": {"num_decay_steps": wsd_cfg.get("decay_steps", 0)},
+            "warmup_ratio": wsd_cfg.get("warmup_ratio", 0.0)
+        }
+        if "warmup_steps" in wsd_cfg:
+            training_args_kwargs["warmup_steps"] = wsd_cfg["warmup_steps"]
+            training_args_kwargs.pop("warmup_ratio", None)
+    else:
+        training_args_kwargs = {}
+
     # Setup Training Arguments
     training_args = TrainingArguments(
         output_dir=cfg.get("output_dir", "./cpt-output"),
@@ -97,10 +186,20 @@ def run_cpt(cfg, dummy_data):
         save_steps=cfg.get("save_steps", 1000),
         logging_steps=cfg.get("logging_steps", 10),
         save_total_limit=cfg.get("save_total_limit", 2),
-        do_train=True
+        do_train=True,
+        **training_args_kwargs
     )
 
-    data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
+    block_diffusion_cfg = cfg.get("block_diffusion", {})
+    if block_diffusion_cfg.get("enabled", False):
+        print(f"Using BlockDiffusionDataCollator with block_size={block_diffusion_cfg.get('block_size', 64)}")
+        data_collator = BlockDiffusionDataCollator(
+            block_size=block_diffusion_cfg.get("block_size", 64),
+            tokenizer=tokenizer,
+            mlm=False
+        )
+    else:
+        data_collator = DataCollatorForLanguageModeling(tokenizer=tokenizer, mlm=False)
 
     embedding_warmup_cfg = cfg.get("embedding_warmup", {})
     if embedding_warmup_cfg.get("enabled", False):
@@ -165,3 +264,7 @@ def run_cpt(cfg, dummy_data):
         trainer.processing_class.push_to_hub(push_repo, commit_message="Upload CPT model") if hasattr(trainer, "processing_class") and trainer.processing_class else trainer.tokenizer.push_to_hub(push_repo, commit_message="Upload CPT model") if hasattr(trainer, "tokenizer") and trainer.tokenizer else None
 
     print("CPT completed successfully.")
+
+    merge_top_k = cfg.get("merge_top_k", 0)
+    if merge_top_k > 1:
+        merge_top_k_checkpoints(cfg.get("output_dir", "./cpt-output"), merge_top_k)
