@@ -2,6 +2,109 @@ import logging
 from datasets import Dataset, interleave_datasets, load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM
 from trl import SFTTrainer, SFTConfig
+from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+
+import torch
+from transformers import DataCollatorForLanguageModeling
+import numpy as np
+
+
+class SFTDiffusionDataCollator(DataCollatorForLanguageModeling):
+    def __init__(self, tokenizer, mask_token_id, max_timesteps=1000, block_size=None, mlm=False):
+        super().__init__(tokenizer=tokenizer, mlm=mlm)
+        self.mask_token_id = mask_token_id
+        self.max_timesteps = max_timesteps
+        self.block_size = block_size
+
+    def __call__(self, examples, return_tensors=None):
+        batch = super().__call__(examples, return_tensors)
+        input_ids = batch["input_ids"]
+        labels = input_ids.clone()
+        batch_size, seq_len = input_ids.shape
+
+        # We need to find the <|im_start|>assistant markers to know where the answers are
+        # If no such markers, we might just fall back to standard behavior or mask nothing
+        assistant_start_token = self.tokenizer.convert_tokens_to_ids("<|im_start|>")
+
+        timesteps = torch.zeros(batch_size, dtype=torch.long)
+
+        for i in range(batch_size):
+            # Find answer boundaries
+            # A simple heuristic: look for assistant start
+            # For a more robust approach, we need to decode or know the exact sequence.
+            # Assuming standard ChatML: <|im_start|>assistant
+            # Let's find all <|im_start|> tokens
+            im_starts = (input_ids[i] == assistant_start_token).nonzero(as_tuple=True)[0]
+
+            # We want to mask ONLY the tokens in the assistant's replies.
+            answer_mask = torch.zeros(seq_len, dtype=torch.bool)
+
+            # Since SFT can have multiple turns, we iterate through <|im_start|>
+            for start_idx in im_starts:
+                # check if next token is 'assistant' (we might just check if it's the assistant role)
+                # But it's easier to just mask until <|im_end|> or EOS
+                # Let's decode to check role, or assume all starts that have 'assistant' after it
+                role_tokens = input_ids[i, start_idx+1:start_idx+3]
+                decoded_role = self.tokenizer.decode(role_tokens).strip()
+                if "assistant" in decoded_role.lower():
+                    # Find end of turn
+                    end_idx = seq_len
+                    for j in range(start_idx + 1, seq_len):
+                        if input_ids[i, j] == self.tokenizer.eos_token_id:
+                            end_idx = j + 1
+                            break
+                    # Answer is from start_idx + length of `<|im_start|>assistant` to end_idx
+                    # Just masking from start_idx+3 for safety (approximate length of role string)
+                    answer_mask[start_idx+3:end_idx] = True
+
+            labels[i, ~answer_mask] = -100
+
+            if answer_mask.sum() > 0:
+                # Sample t
+                t = torch.rand(1).item()
+                # Determine how many to mask
+                num_to_mask = int(t * answer_mask.sum().item())
+                # Get indices of answer tokens
+                answer_indices = answer_mask.nonzero(as_tuple=True)[0]
+                # Randomly select which to mask
+                mask_indices = answer_indices[torch.randperm(len(answer_indices))[:num_to_mask]]
+
+                # Replace with mask_token_id
+                input_ids[i, mask_indices] = self.mask_token_id
+
+                # Set labels to -100 for UNMASKED answer tokens (loss only on masked)
+                unmasked_answer_indices = torch.tensor(list(set(answer_indices.tolist()) - set(mask_indices.tolist())), dtype=torch.long)
+                if len(unmasked_answer_indices) > 0:
+                    labels[i, unmasked_answer_indices] = -100
+
+                # Compute timestep
+                timesteps[i] = max(1, int(t * self.max_timesteps))
+            else:
+                timesteps[i] = 1 # fallback
+
+
+        batch["input_ids"] = input_ids
+        batch["labels"] = labels
+        batch["timesteps"] = timesteps
+
+        # Blockwise SFT Attention Mask
+        if self.block_size is not None and self.block_size > 0:
+            mask = torch.zeros((batch_size, 1, seq_len, seq_len), dtype=torch.float32)
+            num_blocks = (seq_len + self.block_size - 1) // self.block_size
+            for i in range(num_blocks):
+                for j in range(num_blocks):
+                    if j <= i: # causal between blocks
+                        start_i = i * self.block_size
+                        end_i = min((i + 1) * self.block_size, seq_len)
+                        start_j = j * self.block_size
+                        end_j = min((j + 1) * self.block_size, seq_len)
+                        mask[:, :, start_i:end_i, start_j:end_j] = 1.0
+            batch["attention_mask"] = mask
+
+        return batch
+
+
+
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +163,14 @@ def run_sft(cfg, dummy_data):
             probabilities = [p/total for p in probabilities]
             ds = interleave_datasets(datasets, probabilities=probabilities, stopping_strategy="all_exhausted")
 
+
     model = AutoModelForCausalLM.from_pretrained(model_name)
+
+    is_diffusion = isinstance(model, DiffusionModelForConditionalGeneration) or getattr(model.config, "model_type", "") == "lfm_masked_diffusion"
+
+    if is_diffusion:
+        packing = False
+        print("Diffusion model detected. Disabled packing and using SFTDiffusionDataCollator.")
 
     training_args = SFTConfig(
         output_dir=cfg.get("output_dir", "./sft-output"),
@@ -85,12 +195,25 @@ def run_sft(cfg, dummy_data):
         # Ensure EOS control: tie padding/eos behavior to explicit generation boundaries
         tokenizer.eos_token = '<|im_end|>'
 
+    data_collator = None
+    if is_diffusion:
+        block_diffusion_cfg = cfg.get("block_diffusion", {})
+        block_size = block_diffusion_cfg.get("block_size", 64) if block_diffusion_cfg.get("enabled", False) else None
+        data_collator = SFTDiffusionDataCollator(
+            tokenizer=tokenizer,
+            mask_token_id=getattr(model.config, "mask_token_id", tokenizer.pad_token_id),
+            max_timesteps=getattr(model.config, "max_timesteps", 1000),
+            block_size=block_size
+        )
+
     trainer = SFTTrainer(
         model=model,
         args=training_args,
         train_dataset=ds,
         tokenizer=tokenizer,
+        data_collator=data_collator,
     )
+
 
 
     print("Starting Supervised Fine-Tuning...")
