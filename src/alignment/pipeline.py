@@ -2,9 +2,11 @@ import os
 from typing import Dict, Any, List
 from datasets import load_dataset, Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer
+from .rewards.rewards import get_reward_function
 from trl.experimental.orpo import ORPOTrainer, ORPOConfig
 from trl.experimental.cpo import CPOTrainer, CPOConfig
 from trl import DPOTrainer, DPOConfig, GRPOTrainer, GRPOConfig, KTOTrainer, KTOConfig
+from .vrpo import VRPOTrainer, VRPOConfig
 
 from trl.trainer import RewardTrainer, RewardConfig
 from trl.experimental.ppo import PPOTrainer, PPOConfig
@@ -156,9 +158,10 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         reward_funcs = []
         for name in reward_funcs_names:
             if name == "accuracy":
-                reward_funcs.append(accuracy_reward)
+                reward_funcs.append(get_reward_function('accuracy'))
             elif name == "variance":
-                reward_funcs.append(variance_reward)
+                print(f"Warning: variance_reward not strictly defined. Falling back to length_penalty")
+                reward_funcs.append(get_reward_function('length_penalty'))
             else:
                 print(f"Warning: Unknown reward function {name}")
 
@@ -185,6 +188,61 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
 
         trainer.train()
         print("GRPO training completed.")
+
+
+    elif method == "vrpo":
+        print("Starting VRPO (CJ-GRPO) training...")
+        if dummy_data:
+            dataset = Dataset.from_dict({
+                "prompt": ["Write a python function that adds two numbers", "Calculate 2 + 2"] * 10
+            })
+        else:
+            dataset_path = cfg.get("dataset_path")
+            if not dataset_path:
+                raise ValueError("dataset_path must be provided in config for VRPO")
+            dataset = format_grpo_dataset(dataset_path)
+
+        reward_funcs_names = cfg.get("reward_funcs", ["accuracy", "diffusion_trajectory"])
+        reward_funcs = []
+        for name in reward_funcs_names:
+            if name == "accuracy":
+                reward_funcs.append(get_reward_function("accuracy"))
+            elif name == "format":
+                reward_funcs.append(get_reward_function("format"))
+            elif name == "length_penalty":
+                reward_funcs.append(get_reward_function("length_penalty"))
+            elif name == "diffusion_trajectory":
+                reward_funcs.append(get_reward_function("diffusion_trajectory"))
+            elif name == "model_based":
+                reward_funcs.append(get_reward_function("model_based", cfg.get("reward_model_config", {})))
+            else:
+                print(f"Warning: Unknown reward function {name}")
+
+        vrpo_config = VRPOConfig(
+            output_dir=output_dir,
+            per_device_train_batch_size=batch_size,
+            learning_rate=learning_rate,
+            num_train_epochs=epochs,
+            max_completion_length=cfg.get("max_completion_length", 1024),
+            remove_unused_columns=cfg.get("remove_unused_columns", False),
+            use_cpu=cfg.get("use_cpu", True),
+            bf16=cfg.get("bf16", False),
+            fp16=cfg.get("fp16", False),
+            num_generations=cfg.get("num_generations", batch_size),
+            diffusion_steps=cfg.get("diffusion_steps", 20),
+            trajectory_alignment=cfg.get("trajectory_alignment", True)
+        )
+
+        trainer = VRPOTrainer(
+            model=model,
+            reward_funcs=reward_funcs,
+            args=vrpo_config,
+            train_dataset=dataset,
+            processing_class=tokenizer,
+        )
+
+        trainer.train()
+        print("VRPO training completed.")
 
     elif method == "kto":
         print("Starting KTO training...")
@@ -497,7 +555,7 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
         run_rejection_sampling(cfg, dummy_data)
         return
     else:
-        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'orpo', 'cpo', 'spin', 'ppo_reward', 'ppo', 'rejection_sampling', 'rft', 'rlaif' or 'iterative_dpo'.")
+        raise ValueError(f"Unknown alignment method: {method}. Use 'dpo', 'ipo', 'kto', 'grpo', 'vrpo', 'orpo', 'cpo', 'spin', 'ppo_reward', 'ppo', 'rejection_sampling', 'rft', 'rlaif' or 'iterative_dpo'.")
 
 
     if hasattr(trainer, "save_model"):

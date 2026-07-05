@@ -37,6 +37,17 @@ def length_penalty_reward(completions: List[str]) -> List[float]:
             rewards.append(0.5)
     return rewards
 
+
+def diffusion_trajectory_reward(completions: List[str]) -> List[float]:
+    """Simulates evaluating parallel unmasking states of a diffusion model."""
+    rewards = []
+    for text in completions:
+        if len(text.strip()) > 0:
+            rewards.append(0.5)
+        else:
+            rewards.append(0.0)
+    return rewards
+
 class ModelBasedReward:
     def __init__(self, config: Dict[str, Any]):
         self.api_type = config.get("api_type", "transformers")
@@ -150,6 +161,8 @@ def get_reward_function(name: str, config: Optional[Dict[str, Any]] = None):
         return format_reward
     elif name == "length_penalty":
         return length_penalty_reward
+    elif name == "diffusion_trajectory":
+        return diffusion_trajectory_reward
     elif name == "model_based":
         if config is None:
             config = {}

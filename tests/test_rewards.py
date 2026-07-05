@@ -78,3 +78,101 @@ def test_model_based_reward_transformers(mocker):
 
     scores = reward_fn(completions, prompts)
     assert scores == [0.9]
+
+
+def test_diffusion_trajectory_reward():
+    from src.alignment.rewards.rewards import get_reward_function
+    func = get_reward_function("diffusion_trajectory")
+    completions = ["valid text", "   ", "another valid"]
+    rewards = func(completions)
+    assert rewards == [0.5, 0.0, 0.5]
+
+def test_length_penalty_reward():
+    from src.alignment.rewards.rewards import length_penalty_reward
+    completions = ["a"*1001, "a"*501, "a"*100]
+    rewards = length_penalty_reward(completions)
+    assert rewards == [-0.5, 0.0, 0.5]
+
+def test_format_reward():
+    from src.alignment.rewards.rewards import format_reward
+    completions = ["```python pass ```", "no code"]
+    rewards = format_reward(completions)
+    assert rewards == [1.0, 0.0]
+
+def test_accuracy_reward_dummy():
+    from src.alignment.rewards.rewards import accuracy_reward
+    completions = ["this has a <solution>", "this does not"]
+    rewards = accuracy_reward(completions)
+    assert rewards == [1.0, 0.0]
+
+def test_model_based_reward_transformers(mocker):
+    from src.alignment.rewards.rewards import get_reward_function
+
+    mock_pipeline = mocker.MagicMock()
+    mock_pipeline.return_value = [{"generated_text": "Score: 0.8"}]
+    mock_pipeline.tokenizer.eos_token_id = 1
+    mocker.patch("transformers.pipeline", return_value=mock_pipeline)
+
+    config = {
+        "api_type": "transformers",
+        "model_name": "dummy_model"
+    }
+    func = get_reward_function("model_based", config)
+
+    completions = ["comp1", "comp2"]
+    prompts = ["prompt1", "prompt2"]
+    rewards = func(completions, prompts)
+    assert rewards == [0.8, 0.8]
+
+def test_model_based_reward_transformers_no_prompts(mocker):
+    from src.alignment.rewards.rewards import get_reward_function
+
+    mock_pipeline = mocker.MagicMock()
+    mock_pipeline.return_value = [{"generated_text": "Score: 0.6"}]
+    mock_pipeline.tokenizer.eos_token_id = 1
+    mocker.patch("transformers.pipeline", return_value=mock_pipeline)
+
+    config = {
+        "api_type": "transformers",
+        "model_name": "dummy_model"
+    }
+    func = get_reward_function("model_based", config)
+
+    completions = ["comp1"]
+    rewards = func(completions)
+    assert rewards == [0.6]
+
+def test_model_based_reward_transformers_exception(mocker):
+    from src.alignment.rewards.rewards import get_reward_function
+
+    mock_pipeline = mocker.MagicMock()
+    mock_pipeline.side_effect = Exception("Pipeline error")
+    mocker.patch("transformers.pipeline", return_value=mock_pipeline)
+
+    config = {
+        "api_type": "transformers",
+        "model_name": "dummy_model"
+    }
+    func = get_reward_function("model_based", config)
+
+    completions = ["comp1"]
+    rewards = func(completions)
+    assert rewards == [0.0]
+
+def test_model_based_reward_transformers_invalid_parsing(mocker):
+    from src.alignment.rewards.rewards import get_reward_function
+
+    mock_pipeline = mocker.MagicMock()
+    mock_pipeline.return_value = [{"generated_text": "Score: no numbers"}]
+    mock_pipeline.tokenizer.eos_token_id = 1
+    mocker.patch("transformers.pipeline", return_value=mock_pipeline)
+
+    config = {
+        "api_type": "transformers",
+        "model_name": "dummy_model"
+    }
+    func = get_reward_function("model_based", config)
+
+    completions = ["comp1"]
+    rewards = func(completions)
+    assert rewards == [0.0]

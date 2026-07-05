@@ -480,3 +480,81 @@ def test_run_alignment_ppo_no_reward_model_path(mocker, tmp_path):
 
     with pytest.raises(ValueError, match="reward_model_path must be provided in config for PPO"):
         run_alignment_pipeline(cfg, dummy_data=False)
+
+
+def test_run_alignment_vrpo_dummy(mocker, tmp_path):
+    mocker.patch('src.alignment.vrpo.VRPOTrainer.train', return_value=None)
+    mocker.patch('src.alignment.vrpo.VRPOTrainer.save_model', return_value=None)
+
+    cfg = {
+        "method": "vrpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "vrpo_out"),
+        "epochs": 1,
+        "reward_funcs": ["accuracy", "diffusion_trajectory", "length_penalty", "format"]
+    }
+
+    from src.alignment.pipeline import run_alignment_pipeline
+    run_alignment_pipeline(cfg, dummy_data=True)
+
+def test_run_alignment_vrpo_no_dataset_path(mocker, tmp_path):
+    mocker.patch('src.alignment.vrpo.VRPOTrainer.train', return_value=None)
+    mocker.patch('src.alignment.vrpo.VRPOTrainer.save_model', return_value=None)
+
+    cfg = {
+        "method": "vrpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "vrpo_out"),
+        "epochs": 1
+    }
+
+    from src.alignment.pipeline import run_alignment_pipeline
+    import pytest
+    with pytest.raises(ValueError, match="dataset_path must be provided in config for VRPO"):
+        run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_vrpo_with_data(mocker, tmp_path):
+    mocker.patch('src.alignment.vrpo.VRPOTrainer.train', return_value=None)
+    mocker.patch('src.alignment.vrpo.VRPOTrainer.save_model', return_value=None)
+
+    from datasets import Dataset
+    mocker.patch('src.alignment.pipeline.format_grpo_dataset', return_value=Dataset.from_dict({'prompt': ['a']}))
+
+    cfg = {
+        "method": "vrpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "vrpo_out"),
+        "epochs": 1,
+        "dataset_path": "dummy_path"
+    }
+
+    from src.alignment.pipeline import run_alignment_pipeline
+    run_alignment_pipeline(cfg, dummy_data=False)
+
+def test_run_alignment_pipeline_coverage_cpo(mocker, tmp_path):
+    mocker.patch('trl.experimental.cpo.CPOTrainer.train', return_value=None)
+    mocker.patch('trl.experimental.cpo.CPOTrainer.save_model', return_value=None)
+
+    cfg = {
+        "method": "cpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "cpo_out"),
+        "epochs": 1
+    }
+
+    from src.alignment.pipeline import run_alignment_pipeline
+    run_alignment_pipeline(cfg, dummy_data=True)
+
+def test_run_alignment_pipeline_coverage_orpo(mocker, tmp_path):
+    mocker.patch('trl.experimental.orpo.ORPOTrainer.train', return_value=None)
+    mocker.patch('trl.experimental.orpo.ORPOTrainer.save_model', return_value=None)
+
+    cfg = {
+        "method": "orpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "orpo_out"),
+        "epochs": 1
+    }
+
+    from src.alignment.pipeline import run_alignment_pipeline
+    run_alignment_pipeline(cfg, dummy_data=True)
