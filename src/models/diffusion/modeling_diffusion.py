@@ -74,13 +74,43 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 if hasattr(module, "bias") and isinstance(module.bias, torch.Tensor) and module.bias.dim() == 4:
                     module.bias.data.fill_(1)
 
+
+    def get_steering_vector(self, positive_input_ids, negative_input_ids, layer_name, attention_mask=None):
+        captured_states = []
+
+        def hook(module, input, output):
+            if isinstance(output, tuple):
+                captured_states.append(output[0].detach())
+            else:
+                captured_states.append(output.detach())
+
+        target_layer = dict(self.inner_model.named_modules()).get(layer_name)
+        if target_layer is None:
+            raise ValueError(f"Layer {layer_name} not found in inner_model")
+
+        handle = target_layer.register_forward_hook(hook)
+
+        try:
+            self.forward(input_ids=positive_input_ids, attention_mask=attention_mask)
+            self.forward(input_ids=negative_input_ids, attention_mask=attention_mask)
+        finally:
+            handle.remove()
+
+        if len(captured_states) != 2:
+            raise RuntimeError("Failed to capture hidden states for both forward passes.")
+
+        positive_mean = captured_states[0].mean(dim=1)
+        negative_mean = captured_states[1].mean(dim=1)
+
+        return positive_mean - negative_mean
+
     def get_input_embeddings(self):
         return self.inner_model.get_input_embeddings()
 
     def set_input_embeddings(self, value):
         self.inner_model.set_input_embeddings(value)
 
-    def forward(self, input_ids=None, timesteps=None, attention_mask=None, inputs_embeds=None, labels=None, **kwargs):
+    def forward(self, input_ids=None, timesteps=None, attention_mask=None, inputs_embeds=None, labels=None, steering_vector=None, steering_layer_name=None, steering_scale=1.0, **kwargs):
         if inputs_embeds is None:
             if input_ids is None:
                 raise ValueError("You have to specify either input_ids or inputs_embeds")
@@ -93,12 +123,27 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         else:
             hidden_states = inputs_embeds
 
-        outputs = self.inner_model(
-            inputs_embeds=hidden_states,
-            attention_mask=attention_mask,
-            return_dict=True,
-            **kwargs
-        )
+        handle = None
+        if steering_vector is not None and steering_layer_name is not None:
+            target_layer = dict(self.inner_model.named_modules()).get(steering_layer_name)
+            if target_layer is not None:
+                def steer_hook(module, input, output):
+                    steer = steering_scale * steering_vector.unsqueeze(1) # shape (batch, 1, hidden)
+                    if isinstance(output, tuple):
+                        return tuple([output[0] + steer] + list(output[1:]))
+                    return output + steer
+                handle = target_layer.register_forward_hook(steer_hook)
+
+        try:
+            outputs = self.inner_model(
+                inputs_embeds=hidden_states,
+                attention_mask=attention_mask,
+                return_dict=True,
+                **kwargs
+            )
+        finally:
+            if handle is not None:
+                handle.remove()
 
         logits = self.lm_head(outputs.last_hidden_state)
 
@@ -132,6 +177,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         cfg_scale: float = 0.0,
         remasking: Optional[str] = None,
         attention_mask: Optional[torch.Tensor] = None,
+        unconditional_input_ids: Optional[torch.Tensor] = None,
         **kwargs
     ):
         """
@@ -178,6 +224,22 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                 outputs = self(input_ids=x, attention_mask=attention_mask, timesteps=current_timesteps)
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+
+                if cfg_scale > 0.0 and unconditional_input_ids is not None:
+                    uncond_x = x.clone()
+                    # Replace the conditional prefix with unconditional prefix
+                    # Assume unconditional_input_ids length <= T
+                    uncond_len = unconditional_input_ids.size(1)
+                    uncond_x[:, :uncond_len] = unconditional_input_ids
+                    # If uncond_len < T, we might want to pad it with mask_id or leave original,
+                    # standard CFG assumes same sequence length prefix
+
+                    uncond_outputs = self(input_ids=uncond_x, attention_mask=attention_mask, timesteps=current_timesteps)
+                    uncond_logits = uncond_outputs.logits if hasattr(uncond_outputs, "logits") else uncond_outputs[0]
+
+                    guided_logits = uncond_logits + cfg_scale * (logits - uncond_logits)
+                    # Column normalization
+                    logits = F.log_softmax(guided_logits, dim=-1)
 
                 if temperature > 0:
                     logits_f = logits.to(torch.float32)
