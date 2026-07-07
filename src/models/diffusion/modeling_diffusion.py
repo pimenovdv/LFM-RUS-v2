@@ -175,6 +175,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         block_length: Optional[int] = None,
         temperature: float = 0.0,
         cfg_scale: float = 0.0,
+        cfg_schedule: str = "constant",
+        top_k: int = 0,
+        top_p: float = 1.0,
         remasking: Optional[str] = None,
         attention_mask: Optional[torch.Tensor] = None,
         unconditional_input_ids: Optional[torch.Tensor] = None,
@@ -226,6 +229,15 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
 
                 if cfg_scale > 0.0 and unconditional_input_ids is not None:
+                    step_ratio = i / max(1, steps_per_block - 1) if steps_per_block > 1 else 0.0
+                    if cfg_schedule == "linear":
+                        current_cfg_scale = cfg_scale * (1.0 - step_ratio)
+                    elif cfg_schedule == "cosine":
+                        import math
+                        current_cfg_scale = cfg_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    else:
+                        current_cfg_scale = cfg_scale
+
                     uncond_x = x.clone()
                     # Replace the conditional prefix with unconditional prefix
                     # Assume unconditional_input_ids length <= T
@@ -237,14 +249,34 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     uncond_outputs = self(input_ids=uncond_x, attention_mask=attention_mask, timesteps=current_timesteps)
                     uncond_logits = uncond_outputs.logits if hasattr(uncond_outputs, "logits") else uncond_outputs[0]
 
-                    guided_logits = uncond_logits + cfg_scale * (logits - uncond_logits)
+                    guided_logits = uncond_logits + current_cfg_scale * (logits - uncond_logits)
                     # Column normalization
                     logits = F.log_softmax(guided_logits, dim=-1)
+
+                if top_k > 0:
+                    top_k_val = min(max(top_k, 1), logits.size(-1))
+                    indices_to_remove = logits < torch.topk(logits, top_k_val, dim=-1)[0][..., -1, None]
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                if top_p < 1.0:
+                    sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
+                    cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+
+                    # Remove tokens with cumulative probability above the threshold
+                    sorted_indices_to_remove = cumulative_probs > top_p
+                    # Shift the indices to the right to keep also the first token above the threshold
+                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                    sorted_indices_to_remove[..., 0] = 0
+
+                    indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
                 if temperature > 0:
                     logits_f = logits.to(torch.float32)
                     noise = torch.rand_like(logits_f)
-                    gumbel_noise = (-torch.log(noise)) ** temperature
+                    gumbel_noise = (-torch.log(noise.clamp(min=1e-9))) ** temperature
+
+                    # For masked items, logits is -inf, so exp() is 0. 0 / gumbel_noise is 0.
                     logits_with_noise = logits_f.exp() / gumbel_noise
                 else:
                     logits_with_noise = logits
