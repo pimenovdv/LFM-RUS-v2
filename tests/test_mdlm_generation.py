@@ -93,3 +93,31 @@ def test_generate_temperature(dummy_model):
     )
 
     assert out_temp.shape == (batch_size, seq_len + 2)
+
+def test_generate_repetition_penalty(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_rep_penalty = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        repetition_penalty=1.2
+    )
+
+    assert out_rep_penalty.shape == (batch_size, seq_len + 2)
+
+def test_generate_min_p(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_min_p = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        min_p=0.05
+    )
+
+    assert out_min_p.shape == (batch_size, seq_len + 2)
