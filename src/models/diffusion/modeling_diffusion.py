@@ -178,6 +178,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         cfg_schedule: str = "constant",
         top_k: int = 0,
         top_p: float = 1.0,
+        min_p: float = 0.0,
+        repetition_penalty: float = 1.0,
         remasking: Optional[str] = None,
         attention_mask: Optional[torch.Tensor] = None,
         unconditional_input_ids: Optional[torch.Tensor] = None,
@@ -258,6 +260,25 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     indices_to_remove = logits < torch.topk(logits, top_k_val, dim=-1)[0][..., -1, None]
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                if repetition_penalty != 1.0:
+                    # Apply repetition penalty to already generated/unmasked tokens
+                    # We want to penalize logits across the entire vocabulary for tokens that appear in the context.
+                    # Since `logits` is shape (batch_size, seq_len, vocab_size), we apply penalty for each batch item
+                    for b in range(batch_size):
+                        # Get tokens in the context (ignoring mask tokens)
+                        context_tokens = x[b, :block_end]
+                        valid_context = context_tokens[context_tokens != mask_id]
+
+                        if valid_context.numel() > 0:
+                            # Extract logits for valid context tokens across all positions
+                            # logits[b, :, valid_context]
+                            score = logits[b, :, valid_context]
+
+                            # if score < 0, multiply by penalty, if score > 0 divide by penalty
+                            penalized_score = torch.where(score < 0, score * repetition_penalty, score / repetition_penalty)
+
+                            logits[b, :, valid_context] = penalized_score
+
                 if top_p < 1.0:
                     sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
                     cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
@@ -269,6 +290,12 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     sorted_indices_to_remove[..., 0] = 0
 
                     indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                if min_p > 0.0:
+                    probs = F.softmax(logits, dim=-1)
+                    max_probs = probs.max(dim=-1, keepdim=True).values
+                    indices_to_remove = probs < (min_p * max_probs)
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
                 if temperature > 0:
