@@ -121,3 +121,18 @@ def test_generate_min_p(dummy_model):
     )
 
     assert out_min_p.shape == (batch_size, seq_len + 2)
+
+def test_generate_frequency_presence_penalty(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_penalties = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        frequency_penalty=0.5,
+        presence_penalty=0.5
+    )
+
+    assert out_penalties.shape == (batch_size, seq_len + 2)
