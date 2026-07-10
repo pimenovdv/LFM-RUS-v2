@@ -136,3 +136,26 @@ def test_generate_frequency_presence_penalty(dummy_model):
     )
 
     assert out_penalties.shape == (batch_size, seq_len + 2)
+
+def test_generate_logit_bias_and_suppress_tokens(dummy_model):
+    batch_size = 1
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    # Suppress all tokens except one (token_id=42)
+    # Give a massive bias to token_id=42
+    suppress_tokens = list(range(1, 42)) + list(range(43, 100))
+    logit_bias = {42: 1e9}
+
+    out_biased = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        logit_bias=logit_bias,
+        suppress_tokens=suppress_tokens
+    )
+
+    # With all other tokens suppressed and 42 given massive bias, the generated tokens should be 42
+    # The generated tokens are the last `max_new_tokens` items.
+    generated_tokens = out_biased[:, seq_len:]
+    assert torch.all(generated_tokens == 42).item()
