@@ -182,6 +182,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         repetition_penalty: float = 1.0,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
+        logit_bias: Optional[dict[int, float]] = None,
+        suppress_tokens: Optional[list[int]] = None,
         remasking: Optional[str] = None,
         attention_mask: Optional[torch.Tensor] = None,
         unconditional_input_ids: Optional[torch.Tensor] = None,
@@ -256,6 +258,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     guided_logits = uncond_logits + current_cfg_scale * (logits - uncond_logits)
                     # Column normalization
                     logits = F.log_softmax(guided_logits, dim=-1)
+
+                if suppress_tokens is not None:
+                    logits[:, :, suppress_tokens] = -float("Inf")
+
+                if logit_bias is not None:
+                    for token_id, bias in logit_bias.items():
+                        logits[:, :, token_id] += bias
 
                 if top_k > 0:
                     top_k_val = min(max(top_k, 1), logits.size(-1))
