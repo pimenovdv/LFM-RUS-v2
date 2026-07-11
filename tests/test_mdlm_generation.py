@@ -159,3 +159,24 @@ def test_generate_logit_bias_and_suppress_tokens(dummy_model):
     # The generated tokens are the last `max_new_tokens` items.
     generated_tokens = out_biased[:, seq_len:]
     assert torch.all(generated_tokens == 42).item()
+
+def test_generate_exponential_cfg_and_rescale(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+    uncond_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    # Test the new exponential schedule and guidance rescale functionality
+    out = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        cfg_scale=2.0,
+        cfg_schedule="exponential",
+        guidance_rescale=0.7,
+        unconditional_input_ids=uncond_ids
+    )
+
+    # Validate output shape
+    assert out.shape == (batch_size, seq_len + 2)
+    assert out.dtype == input_ids.dtype

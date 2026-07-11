@@ -176,6 +176,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         temperature: float = 0.0,
         cfg_scale: float = 0.0,
         cfg_schedule: str = "constant",
+        guidance_rescale: float = 0.0,
         top_k: int = 0,
         top_p: float = 1.0,
         min_p: float = 0.0,
@@ -241,6 +242,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     elif cfg_schedule == "cosine":
                         import math
                         current_cfg_scale = cfg_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif cfg_schedule == "exponential":
+                        import math
+                        current_cfg_scale = cfg_scale * math.exp(-3.0 * step_ratio)
                     else:
                         current_cfg_scale = cfg_scale
 
@@ -256,6 +260,19 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     uncond_logits = uncond_outputs.logits if hasattr(uncond_outputs, "logits") else uncond_outputs[0]
 
                     guided_logits = uncond_logits + current_cfg_scale * (logits - uncond_logits)
+
+                    if guidance_rescale > 0.0:
+                        std_logits = logits.std(dim=-1, keepdim=True)
+                        std_guided_logits = guided_logits.std(dim=-1, keepdim=True)
+                        # Fix out of bounds if standard deviation is exactly 0 to avoid NaNs
+                        std_guided_logits = torch.where(std_guided_logits > 0, std_guided_logits, torch.ones_like(std_guided_logits))
+
+                        guided_logits_rescaled = guided_logits * (std_logits / std_guided_logits)
+                        guided_logits = (
+                            guided_logits_rescaled * guidance_rescale
+                            + guided_logits * (1.0 - guidance_rescale)
+                        )
+
                     # Column normalization
                     logits = F.log_softmax(guided_logits, dim=-1)
 
