@@ -2,12 +2,12 @@
 
 Этот документ содержит пошаговый план разработки для интеграции маскированной дискретной диффузии в существующий пайплайн обучения.
 
-## [x] Завершенные этапы (Шаги 1-10)
-**Цель:** Базовая интеграция MDLM, адаптация пайплайнов (CPT/SFT/Alignment), реализация всех основных методов сэмплирования (Dynamic CFG, Top-k/p, Min-p, Penalties), а также управление генерацией на уровне токенов (Logit Bias и Suppress Tokens).
+## [x] Завершенные этапы (Шаги 1-11)
+**Цель:** Базовая интеграция MDLM, адаптация пайплайнов (CPT/SFT/Alignment), реализация основных и расширенных методов сэмплирования (Dynamic CFG, Guidance Rescale, Exponential Schedule, Top-k/p, Min-p, Penalties), а также управление генерацией на уровне токенов (Logit Bias и Suppress Tokens).
 
-## [x] Шаг 11: Расширение методов CFG (Guidance Rescale и Exponential Schedule)
-**Цель:** Добавить продвинутые настройки Classifier-Free Guidance (CFG) для предотвращения перенасыщения логитов и более гибкого расписания.
+## [x] Шаг 12: Добавление поддержки Activation Steering при генерации
+**Цель:** Позволить пользователям направлять процесс диффузионной генерации, передавая `steering_vector`, `steering_layer_name` и `steering_scale` в метод `generate`.
 * **Детали реализации:**
-  * Добавить поддержку `cfg_schedule="exponential"` в методе `generate` файла `modeling_diffusion.py` для экспоненциального затухания CFG.
-  * Добавить параметр `guidance_rescale` (по умолчанию 0.0). При применении CFG, если `guidance_rescale > 0.0`, производить рескейлинг guided логитов к стандартному отклонению оригинальных логитов, смешивая их в пропорции `guidance_rescale`.
-  * Добавить тесты в `test_mdlm_generation.py`, проверяющие работу нового расписания и рескейлинга.
+  * Добавить аргументы `steering_vector`, `steering_layer_name` и `steering_scale` (по умолчанию 1.0) в функцию `generate` файла `src/models/diffusion/modeling_diffusion.py`.
+  * Пробросить эти аргументы при вызове `self(...)` внутри цикла генерации, как для основного, так и для unconditional прохода (если применяется CFG).
+  * Покрыть тестами в `tests/test_diffusion_steering.py`.
