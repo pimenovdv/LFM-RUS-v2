@@ -188,6 +188,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         remasking: Optional[str] = None,
         attention_mask: Optional[torch.Tensor] = None,
         unconditional_input_ids: Optional[torch.Tensor] = None,
+        steering_vector: Optional[torch.Tensor] = None,
+        steering_layer_name: Optional[str] = None,
+        steering_scale: float = 1.0,
         **kwargs
     ):
         """
@@ -232,7 +235,14 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 t_ratio = mask_index.sum(dim=1).float() / (T + max_new_tokens)
                 current_timesteps = (t_ratio * self.config.max_timesteps).long().clamp(min=1, max=self.config.max_timesteps)
 
-                outputs = self(input_ids=x, attention_mask=attention_mask, timesteps=current_timesteps)
+                outputs = self(
+                    input_ids=x,
+                    attention_mask=attention_mask,
+                    timesteps=current_timesteps,
+                    steering_vector=steering_vector,
+                    steering_layer_name=steering_layer_name,
+                    steering_scale=steering_scale
+                )
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
 
                 if cfg_scale > 0.0 and unconditional_input_ids is not None:
@@ -256,7 +266,14 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     # If uncond_len < T, we might want to pad it with mask_id or leave original,
                     # standard CFG assumes same sequence length prefix
 
-                    uncond_outputs = self(input_ids=uncond_x, attention_mask=attention_mask, timesteps=current_timesteps)
+                    uncond_outputs = self(
+                        input_ids=uncond_x,
+                        attention_mask=attention_mask,
+                        timesteps=current_timesteps,
+                        steering_vector=steering_vector,
+                        steering_layer_name=steering_layer_name,
+                        steering_scale=steering_scale
+                    )
                     uncond_logits = uncond_outputs.logits if hasattr(uncond_outputs, "logits") else uncond_outputs[0]
 
                     guided_logits = uncond_logits + current_cfg_scale * (logits - uncond_logits)
