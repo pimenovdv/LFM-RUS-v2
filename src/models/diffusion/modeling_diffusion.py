@@ -174,6 +174,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         steps: Optional[int] = None,
         block_length: Optional[int] = None,
         temperature: float = 0.0,
+        temperature_schedule: str = "constant",
+        min_temperature: float = 0.0,
         cfg_scale: float = 0.0,
         cfg_schedule: str = "constant",
         guidance_rescale: float = 0.0,
@@ -191,6 +193,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         steering_vector: Optional[torch.Tensor] = None,
         steering_layer_name: Optional[str] = None,
         steering_scale: float = 1.0,
+        eos_token_id: Optional[int] = None,
+        pad_token_id: Optional[int] = None,
         **kwargs
     ):
         """
@@ -228,6 +232,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
             num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block)
 
             for i in range(steps_per_block):
+                step_ratio = i / max(1, steps_per_block - 1) if steps_per_block > 1 else 0.0
+
                 mask_index = (x == mask_id)
 
                 # We can supply timesteps if needed, but in basic sampling they are implicit or t=0 for unmasked
@@ -246,7 +252,6 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
 
                 if cfg_scale > 0.0 and unconditional_input_ids is not None:
-                    step_ratio = i / max(1, steps_per_block - 1) if steps_per_block > 1 else 0.0
                     if cfg_schedule == "linear":
                         current_cfg_scale = cfg_scale * (1.0 - step_ratio)
                     elif cfg_schedule == "cosine":
@@ -345,10 +350,22 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     indices_to_remove = probs < (min_p * max_probs)
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                current_temperature = temperature
                 if temperature > 0:
+                    if temperature_schedule == "linear":
+                        current_temperature = temperature * (1.0 - step_ratio)
+                    elif temperature_schedule == "cosine":
+                        import math
+                        current_temperature = temperature * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif temperature_schedule == "exponential":
+                        import math
+                        current_temperature = temperature * math.exp(-3.0 * step_ratio)
+                    current_temperature = max(current_temperature, min_temperature)
+
+                if current_temperature > 0:
                     logits_f = logits.to(torch.float32)
                     noise = torch.rand_like(logits_f)
-                    gumbel_noise = (-torch.log(noise.clamp(min=1e-9))) ** temperature
+                    gumbel_noise = (-torch.log(noise.clamp(min=1e-9))) ** current_temperature
 
                     # For masked items, logits is -inf, so exp() is 0. 0 / gumbel_noise is 0.
                     logits_with_noise = logits_f.exp() / gumbel_noise
@@ -380,6 +397,29 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         transfer_index[j, select_index] = True
 
                 x[transfer_index] = x0[transfer_index].to(x.dtype)
+
+            # Check for early stopping via eos_token_id
+            if eos_token_id is not None:
+                # Find sequences that generated eos_token_id in the current block
+                eos_in_block = (x[:, block_start:block_end] == eos_token_id)
+                if eos_in_block.any():
+                    # If all sequences in the batch have an eos_token_id in or before this block, stop
+                    # A sequence is finished if it has an eos_token anywhere after T
+                    finished_mask = (x[:, T:block_end] == eos_token_id).any(dim=1)
+                    if finished_mask.all():
+                        # Truncate x up to block_end
+                        x = x[:, :block_end]
+                        break
+
+        # Process padding if eos_token_id and pad_token_id are provided
+        if eos_token_id is not None and pad_token_id is not None:
+            for b in range(batch_size):
+                # Find first eos_token_id after the prompt
+                eos_indices = (x[b, T:] == eos_token_id).nonzero(as_tuple=True)[0]
+                if len(eos_indices) > 0:
+                    first_eos = eos_indices[0].item() + T
+                    # Pad the rest of the sequence
+                    x[b, first_eos + 1:] = pad_token_id
 
         return x
 

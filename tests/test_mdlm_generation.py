@@ -180,3 +180,73 @@ def test_generate_exponential_cfg_and_rescale(dummy_model):
     # Validate output shape
     assert out.shape == (batch_size, seq_len + 2)
     assert out.dtype == input_ids.dtype
+
+
+def test_dynamic_temperature_schedule(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_linear = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        temperature=1.0,
+        temperature_schedule="linear",
+        min_temperature=0.1
+    )
+
+    out_cosine = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        temperature=1.0,
+        temperature_schedule="cosine",
+        min_temperature=0.1
+    )
+
+    out_exponential = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        temperature=1.0,
+        temperature_schedule="exponential",
+        min_temperature=0.1
+    )
+
+    assert out_linear.shape == (batch_size, seq_len + 2)
+    assert out_cosine.shape == (batch_size, seq_len + 2)
+    assert out_exponential.shape == (batch_size, seq_len + 2)
+
+
+def test_early_stopping_eos(dummy_model, mocker):
+    batch_size = 1
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    eos_token_id = 99
+    pad_token_id = 100
+
+    # Force the model to generate eos_token_id as the first generated token
+    logit_bias = {eos_token_id: 1e9}
+
+    # max_new_tokens is 4, but due to eos_token_id being generated immediately,
+    # the sequence should stop early at the first block (block_length is 2),
+    # meaning the output length should be seq_len + block_length (4 + 2 = 6).
+    # Since it stopped early and padded, the second token in the block should be pad_token_id.
+
+    out = dummy_model.generate(
+        input_ids,
+        max_new_tokens=4,
+        steps=4,
+        block_length=2,
+        eos_token_id=eos_token_id,
+        pad_token_id=pad_token_id,
+        logit_bias=logit_bias
+    )
+
+    assert out.shape == (batch_size, seq_len + 2)
+    # The first token generated (index 4) should be eos_token_id
+    assert out[0, seq_len].item() == eos_token_id
+    # The second token generated (index 5) should be pad_token_id
+    assert out[0, seq_len + 1].item() == pad_token_id
