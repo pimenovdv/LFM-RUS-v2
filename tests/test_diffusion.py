@@ -114,3 +114,59 @@ def test_diffusion_model_generate(mocker):
 
     res = model.generate(input_ids, max_new_tokens=2, steps=2, block_length=2)
     assert res.shape == (2, 5)
+
+def test_typical_p_sampling(mocker):
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    # Setup controlled logits output
+    mock_out = mocker.MagicMock()
+    # Logits where some probabilities are much higher
+    logits = torch.zeros((1, 4, 10))
+    logits[0, :, 0] = 10.0 # High prob token
+    logits[0, :, 1] = 5.0
+    logits[0, :, 2] = -5.0
+    mock_out.logits = logits
+    model.forward = mocker.MagicMock(return_value=mock_out)
+
+    input_ids = torch.tensor([[1, 2]])
+
+    # Run typical_p sampling
+    res = model.generate(input_ids, max_new_tokens=2, steps=1, block_length=2, typical_p=0.5)
+
+    # Just checking it doesn't crash and returns the correct shape
+    assert res.shape == (1, 4)
+
+def test_top_a_sampling(mocker):
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    mock_out = mocker.MagicMock()
+    logits = torch.zeros((1, 4, 10))
+    logits[0, :, 0] = 5.0
+    logits[0, :, 1] = 4.0
+    logits[0, :, 2] = -5.0
+    mock_out.logits = logits
+    model.forward = mocker.MagicMock(return_value=mock_out)
+
+    input_ids = torch.tensor([[1, 2]])
+
+    # Run top_a sampling
+    res = model.generate(input_ids, max_new_tokens=2, steps=1, block_length=2, top_a=0.5)
+
+    # Checking it runs correctly
+    assert res.shape == (1, 4)
