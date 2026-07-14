@@ -182,6 +182,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         top_k: int = 0,
         top_p: float = 1.0,
         min_p: float = 0.0,
+        typical_p: float = 1.0,
+        top_a: float = 0.0,
         repetition_penalty: float = 1.0,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
@@ -348,6 +350,29 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     probs = F.softmax(logits, dim=-1)
                     max_probs = probs.max(dim=-1, keepdim=True).values
                     indices_to_remove = probs < (min_p * max_probs)
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                if top_a > 0.0:
+                    probs = F.softmax(logits, dim=-1)
+                    max_probs = probs.max(dim=-1, keepdim=True).values
+                    limit = top_a * (max_probs ** 2)
+                    indices_to_remove = probs < limit
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                if typical_p < 1.0:
+                    probs = F.softmax(logits, dim=-1)
+                    entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                    shifted_entropy = torch.abs(-torch.log(probs + 1e-9) - entropy)
+
+                    sorted_entropy, sorted_indices = torch.sort(shifted_entropy, descending=False, dim=-1)
+                    sorted_probs = torch.gather(probs, -1, sorted_indices)
+                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+                    sorted_indices_to_remove = cumulative_probs > typical_p
+                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                    sorted_indices_to_remove[..., 0] = 0
+
+                    indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
                 current_temperature = temperature
