@@ -135,11 +135,14 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 handle = target_layer.register_forward_hook(steer_hook)
 
         try:
+            inner_kwargs = kwargs.copy()
+            if 'return_dict' in inner_kwargs:
+                del inner_kwargs['return_dict']
             outputs = self.inner_model(
                 inputs_embeds=hidden_states,
                 attention_mask=attention_mask,
                 return_dict=True,
-                **kwargs
+                **inner_kwargs
             )
         finally:
             if handle is not None:
@@ -184,6 +187,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         min_p: float = 0.0,
         typical_p: float = 1.0,
         top_a: float = 0.0,
+        epsilon_cutoff: float = 0.0,
+        eta_cutoff: float = 0.0,
         repetition_penalty: float = 1.0,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
@@ -357,6 +362,23 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     max_probs = probs.max(dim=-1, keepdim=True).values
                     limit = top_a * (max_probs ** 2)
                     indices_to_remove = probs < limit
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                if epsilon_cutoff > 0.0:
+                    probs = F.softmax(logits, dim=-1)
+                    indices_to_remove = probs < epsilon_cutoff
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                if eta_cutoff > 0.0:
+                    probs = F.softmax(logits, dim=-1)
+                    entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                    # min(eta_cutoff, sqrt(eta_cutoff) * exp(-entropy))
+                    eta_tensor = torch.tensor(eta_cutoff, device=logits.device, dtype=logits.dtype)
+                    threshold = torch.minimum(
+                        eta_tensor,
+                        torch.sqrt(eta_tensor) * torch.exp(-entropy)
+                    )
+                    indices_to_remove = probs < threshold
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
                 if typical_p < 1.0:
