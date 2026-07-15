@@ -2,13 +2,13 @@
 
 Этот документ содержит пошаговый план разработки для интеграции маскированной дискретной диффузии в существующий пайплайн обучения.
 
-## [x] Завершенные этапы (Шаги 1-14)
-**Цель:** Базовая интеграция MDLM, адаптация пайплайнов (CPT/SFT/Alignment), реализация основных и расширенных методов сэмплирования (Dynamic CFG, Guidance Rescale, Exponential Schedule, Top-k/p, Min-p, Penalties, Dynamic Temperature, Early Stopping), управление генерацией на уровне токенов (Logit Bias и Suppress Tokens), а также поддержка Activation Steering при генерации.
+## [x] Завершенные этапы (Шаги 1-15)
+**Цель:** Базовая интеграция MDLM, адаптация пайплайнов (CPT/SFT/Alignment), реализация всех основных методов сэмплирования (Dynamic CFG, Guidance Rescale, Exponential Schedule, Top-k/p/a, Min-p, Typical, Penalties, Dynamic Temperature, Early Stopping), управление генерацией (Logit Bias, Suppress Tokens) и Activation Steering.
 
-## [x] Шаг 15: Добавление Typical Sampling и Top-A Sampling
-**Цель:** Внедрение продвинутых методов фильтрации токенов (typical_p, top_a) в метод генерации для улучшения качества текста.
+## [x] Шаг 16: Добавление Epsilon и Eta Sampling
+**Цель:** Внедрение методов обрезки распределения на основе Epsilon (абсолютный порог) и Eta (энтропийно-зависимый порог) в метод `generate`.
 * **Детали реализации:**
-  * Обновить метод `generate` в `src/models/diffusion/modeling_diffusion.py` аргументами `typical_p` и `top_a`.
-  * Реализовать логику Typical Sampling на основе энтропии распределения вероятностей.
-  * Реализовать логику Top-A Sampling на основе максимальной вероятности.
-  * Написать unit-тесты для обеих стратегий.
+  * Добавить аргументы `epsilon_cutoff` и `eta_cutoff` в функцию `generate` (`src/models/diffusion/modeling_diffusion.py`).
+  * Реализовать логику Epsilon-отсечения: удаление токенов с вероятностью ниже абсолютного порога `epsilon_cutoff`.
+  * Реализовать логику Eta-отсечения: удаление токенов с вероятностью ниже адаптивного порога `min(eta_cutoff, sqrt(eta_cutoff) * exp(-entropy))`.
+  * Написать тесты для проверки корректности алгоритмов в `tests/test_diffusion.py`.
