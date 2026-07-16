@@ -2,13 +2,13 @@
 
 Этот документ содержит пошаговый план разработки для интеграции маскированной дискретной диффузии в существующий пайплайн обучения.
 
-## [x] Завершенные этапы (Шаги 1-15)
-**Цель:** Базовая интеграция MDLM, адаптация пайплайнов (CPT/SFT/Alignment), реализация всех основных методов сэмплирования (Dynamic CFG, Guidance Rescale, Exponential Schedule, Top-k/p/a, Min-p, Typical, Penalties, Dynamic Temperature, Early Stopping), управление генерацией (Logit Bias, Suppress Tokens) и Activation Steering.
+## [x] Завершенные этапы (Шаги 1-16)
+**Цель:** Базовая интеграция MDLM, пайплайнов и реализация основных методов сэмплирования (Dynamic CFG, Guidance Rescale, Exponential Schedule, Top-k/p/a, Min-p, Typical, Epsilon, Eta, Penalties, Dynamic Temperature, Early Stopping), управление генерацией и Activation Steering.
 
-## [x] Шаг 16: Добавление Epsilon и Eta Sampling
-**Цель:** Внедрение методов обрезки распределения на основе Epsilon (абсолютный порог) и Eta (энтропийно-зависимый порог) в метод `generate`.
+## [x] Шаг 17: Добавление Tail Free Sampling (TFS) и Dynamic Entropy Temperature
+**Цель:** Внедрение метода фильтрации хвоста распределения (TFS) и динамической температуры на основе энтропии в метод `generate`.
 * **Детали реализации:**
-  * Добавить аргументы `epsilon_cutoff` и `eta_cutoff` в функцию `generate` (`src/models/diffusion/modeling_diffusion.py`).
-  * Реализовать логику Epsilon-отсечения: удаление токенов с вероятностью ниже абсолютного порога `epsilon_cutoff`.
-  * Реализовать логику Eta-отсечения: удаление токенов с вероятностью ниже адаптивного порога `min(eta_cutoff, sqrt(eta_cutoff) * exp(-entropy))`.
-  * Написать тесты для проверки корректности алгоритмов в `tests/test_diffusion.py`.
+  * Добавить аргументы `tfs_z` и `dynamic_temperature_entropy` в функцию `generate` (`src/models/diffusion/modeling_diffusion.py`).
+  * Реализовать логику TFS: отсечение токенов на основе второй производной вероятностей.
+  * Реализовать логику Dynamic Entropy Temperature: корректировка температуры генерации пропорционально локальной энтропии вероятностей токенов.
+  * Написать тесты для проверки корректности алгоритмов `test_tfs_sampling` и `test_dynamic_entropy_temperature` в `tests/test_diffusion.py`.

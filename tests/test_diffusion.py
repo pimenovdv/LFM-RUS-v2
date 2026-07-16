@@ -223,6 +223,60 @@ def test_eta_cutoff_sampling(mocker):
 
     assert res.shape == (1, 4)
 
+def test_tfs_sampling(mocker):
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    mock_out = mocker.MagicMock()
+    logits = torch.zeros((1, 4, 10))
+    logits[0, :, 0] = 10.0
+    logits[0, :, 1] = 9.0
+    logits[0, :, 2] = 5.0
+    logits[0, :, 3] = 4.0
+    logits[0, :, 4] = 4.0
+    mock_out.logits = logits
+    model.forward = mocker.MagicMock(return_value=mock_out)
+
+    input_ids = torch.tensor([[1, 2]])
+
+    # Run tfs sampling
+    res = model.generate(input_ids, max_new_tokens=2, steps=1, block_length=2, tfs_z=0.5)
+
+    assert res.shape == (1, 4)
+
+def test_dynamic_entropy_temperature(mocker):
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    mock_out = mocker.MagicMock()
+    logits = torch.zeros((1, 4, 10))
+    # Mix of high and low entropy logits
+    logits[0, 2, :] = 1.0 # High entropy
+    logits[0, 3, 0] = 10.0 # Low entropy
+    mock_out.logits = logits
+    model.forward = mocker.MagicMock(return_value=mock_out)
+
+    input_ids = torch.tensor([[1, 2]])
+
+    # Run dynamic entropy temperature sampling
+    res = model.generate(input_ids, max_new_tokens=2, steps=1, block_length=2, temperature=0.0, dynamic_temperature_entropy=1.0)
+
+    assert res.shape == (1, 4)
+
 def test_generation_parameters(mocker):
     # Test top_k, top_p, min_p, temperature schedules, cfg_scale, penalties
     mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
