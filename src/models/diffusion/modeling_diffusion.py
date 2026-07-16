@@ -189,6 +189,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         top_a: float = 0.0,
         epsilon_cutoff: float = 0.0,
         eta_cutoff: float = 0.0,
+        tfs_z: float = 1.0,
+        dynamic_temperature_entropy: float = 0.0,
         repetition_penalty: float = 1.0,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
@@ -381,6 +383,43 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     indices_to_remove = probs < threshold
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                if tfs_z < 1.0:
+                    probs = F.softmax(logits, dim=-1)
+                    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+
+                    # Calculate first derivative (differences between consecutive probs)
+                    # We pad the right side to keep the same shape
+                    first_deriv = sorted_probs[..., :-1] - sorted_probs[..., 1:]
+
+                    # Calculate second derivative (differences between consecutive first derivatives)
+                    second_deriv = first_deriv[..., :-1] - first_deriv[..., 1:]
+
+                    # Pad second derivative to match sequence length
+                    # We pad with zeros at the end
+                    pad_zeros = torch.zeros((*second_deriv.shape[:-1], 2), device=second_deriv.device, dtype=second_deriv.dtype)
+                    second_deriv = torch.cat([second_deriv, pad_zeros], dim=-1)
+
+                    # Calculate absolute second derivative and its cumulative sum
+                    abs_second_deriv = torch.abs(second_deriv)
+
+                    # Normalize by the sum of absolute second derivatives
+                    sum_abs_second_deriv = torch.sum(abs_second_deriv, dim=-1, keepdim=True)
+                    # Avoid division by zero
+                    sum_abs_second_deriv = torch.clamp(sum_abs_second_deriv, min=1e-9)
+
+                    normalized_second_deriv = abs_second_deriv / sum_abs_second_deriv
+                    cumulative_probs = torch.cumsum(normalized_second_deriv, dim=-1)
+
+                    # Remove tokens where cumulative normalized second derivative is > tfs_z
+                    sorted_indices_to_remove = cumulative_probs > tfs_z
+
+                    # Shift the indices to the right to keep also the first token above the threshold
+                    sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                    sorted_indices_to_remove[..., 0] = 0
+
+                    indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
                 if typical_p < 1.0:
                     probs = F.softmax(logits, dim=-1)
                     entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
@@ -398,7 +437,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
                 current_temperature = temperature
-                if temperature > 0:
+                if temperature > 0 or dynamic_temperature_entropy > 0:
                     if temperature_schedule == "linear":
                         current_temperature = temperature * (1.0 - step_ratio)
                     elif temperature_schedule == "cosine":
@@ -407,9 +446,22 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     elif temperature_schedule == "exponential":
                         import math
                         current_temperature = temperature * math.exp(-3.0 * step_ratio)
-                    current_temperature = max(current_temperature, min_temperature)
 
-                if current_temperature > 0:
+                    if dynamic_temperature_entropy > 0.0:
+                        probs = F.softmax(logits, dim=-1)
+                        entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                        current_temperature = current_temperature + dynamic_temperature_entropy * entropy
+
+                    # Handle case where current_temperature becomes a tensor (from entropy)
+                    if isinstance(current_temperature, torch.Tensor):
+                        current_temperature = torch.clamp(current_temperature, min=min_temperature)
+                    else:
+                        current_temperature = max(current_temperature, min_temperature)
+
+                # Check if current_temperature is > 0 (can be a tensor or float)
+                is_temp_positive = (current_temperature > 0).any() if isinstance(current_temperature, torch.Tensor) else (current_temperature > 0)
+
+                if is_temp_positive:
                     logits_f = logits.to(torch.float32)
                     noise = torch.rand_like(logits_f)
                     gumbel_noise = (-torch.log(noise.clamp(min=1e-9))) ** current_temperature
