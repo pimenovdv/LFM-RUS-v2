@@ -396,3 +396,62 @@ def test_steering_vector_capture(mocker):
 
     vec = model.get_steering_vector(torch.tensor([[1, 2]]), torch.tensor([[3, 4]]), "layer1")
     assert vec.shape == (1, 12)
+
+def test_min_new_tokens(mocker):
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=2, diffusion_steps=2)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.ones((1, 2), dtype=torch.long)
+    # block_size is 2, min_new_tokens=4, eos_token_id=5
+    # the generator logic will set logit for eos_token_id to -inf
+
+    # Mock forward on the class level to bypass torch.nn.Module.__call__ logic
+    mock_forward = mocker.patch.object(DiffusionModelForConditionalGeneration, 'forward')
+    # Because x grows, the model receives inputs of length up to input_len + block_size * iter.
+    # max_new_tokens=4, block_size=2. input_ids is 1x2. So x will be 1x6.
+    logits = torch.randn(1, 6, 10)
+    logits[:, :, 5] = 100.0
+    mock_output = mocker.MagicMock()
+    mock_output.logits = logits
+    mock_forward.return_value = mock_output
+
+    # Test with min_new_tokens
+    res_min_new = model.generate(input_ids, max_new_tokens=4, min_new_tokens=4, eos_token_id=5)
+
+    assert not (res_min_new == 5).any()
+
+def test_xtc_sampling(mocker):
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=2, diffusion_steps=2)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.ones((1, 2), dtype=torch.long)
+
+    mock_forward = mocker.patch.object(DiffusionModelForConditionalGeneration, 'forward')
+    mocker.patch('torch.rand_like', return_value=torch.zeros((1, 4, 10)))
+    logits = torch.zeros(1, 4, 10)
+    logits[:, :, 2] = 50.0  # Top token is 2
+    logits[:, :, 3] = 10.0  # Second is 3
+    mock_output = mocker.MagicMock()
+    mock_output.logits = logits
+    mock_forward.return_value = mock_output
+
+    # xtc_threshold=0.5, xtc_probability=1.0 -> should always drop the top token
+    # input_ids is 1x2, max_new_tokens=2 -> total length 4
+    res = model.generate(input_ids, max_new_tokens=2, xtc_threshold=0.5, xtc_probability=1.0)
+
+    assert not (res == 2).any()
+    assert (res[:, 2:] == 3).all()

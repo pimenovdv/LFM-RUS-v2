@@ -194,6 +194,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         repetition_penalty: float = 1.0,
         frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
+        xtc_threshold: float = 0.0,
+        xtc_probability: float = 0.0,
+        min_new_tokens: Optional[int] = None,
         logit_bias: Optional[dict[int, float]] = None,
         suppress_tokens: Optional[list[int]] = None,
         remasking: Optional[str] = None,
@@ -339,6 +342,41 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                 # frequency_penalty applies proportionally to the count
                                 penalty = (presence_penalty + counts.float() * frequency_penalty).unsqueeze(0)
                                 logits[b, :, unique_tokens] -= penalty.to(logits.device)
+
+                if min_new_tokens is not None and min_new_tokens > 0 and eos_token_id is not None:
+                    # current generated tokens count is block_start - T
+                    # min_new_tokens requirement means block_start + (generated inside block)
+                    # For simplicity in block generation, we just disable eos_token if we haven't reached min_new_tokens.
+                    if block_end - T <= min_new_tokens:
+                        logits[:, :, eos_token_id] = -float("Inf")
+
+                if xtc_probability > 0.0 and xtc_threshold > 0.0:
+                    probs = F.softmax(logits, dim=-1)
+                    max_probs, max_indices = probs.max(dim=-1, keepdim=True)
+
+                    # Create a mask for tokens exceeding the threshold
+                    exceeds_threshold = max_probs > xtc_threshold
+
+                    # Generate random numbers for each token position
+                    random_probs = torch.rand_like(max_probs)
+
+                    # Mask for applying XTC
+                    apply_xtc = exceeds_threshold & (random_probs < xtc_probability)
+
+                    # We need to set the logit of the top token to -inf where apply_xtc is True
+                    # Create a scatter mask
+                    batch_size, seq_len, _ = logits.shape
+
+                    # Expand apply_xtc to match logits shape for scatter
+                    apply_xtc_expanded = apply_xtc.expand(-1, -1, logits.size(-1))
+
+                    # Create a mask that is True only at the max_indices
+                    top_token_mask = torch.zeros_like(logits, dtype=torch.bool).scatter_(-1, max_indices, True)
+
+                    # Combine the masks
+                    xtc_mask = top_token_mask & apply_xtc_expanded
+
+                    logits = logits.masked_fill(xtc_mask, -float("Inf"))
 
                 if top_p < 1.0:
                     sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
