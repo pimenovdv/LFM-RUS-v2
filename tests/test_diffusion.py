@@ -455,3 +455,49 @@ def test_xtc_sampling(mocker):
 
     assert not (res == 2).any()
     assert (res[:, 2:] == 3).all()
+
+def test_no_repeat_ngram_size(mocker):
+    # Setup mock to simulate model unmasking and n-gram penalty
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=1, diffusion_steps=2)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.tensor([[1, 2, 3, 1, 2]])
+    mask_id = config.mask_token_id
+
+    with torch.no_grad():
+        mock_forward = mocker.patch.object(DiffusionModelForConditionalGeneration, 'forward')
+        vocab_size = 10
+
+        def forward_side_effect(*args, **kwargs):
+            input_seq = kwargs.get('input_ids', args[0] if args else None)
+            seq_len = input_seq.shape[1]
+            out_logits = torch.zeros(1, seq_len, vocab_size)
+            out_logits[:, -1, 3] = 10.0
+            out_logits[:, -1, 4] = 5.0
+
+            mock_out = mocker.MagicMock()
+            mock_out.logits = out_logits
+            return mock_out
+
+        mock_forward.side_effect = forward_side_effect
+
+        outputs = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=1,
+            block_length=1,
+            steps=1,
+            no_repeat_ngram_size=2
+        )
+
+        assert outputs[0, -1].item() != 3
+        assert outputs[0, -1].item() == 4
