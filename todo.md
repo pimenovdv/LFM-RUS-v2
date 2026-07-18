@@ -5,10 +5,12 @@
 ## [x] Завершенные этапы (Шаги 1-17)
 **Цель:** Базовая интеграция MDLM, пайплайнов и реализация основных методов сэмплирования (Dynamic CFG, Guidance Rescale, Exponential Schedule, Top-k/p/a, Min-p, Typical, Epsilon, Eta, Penalties, Dynamic Temperature, Early Stopping, TFS, Dynamic Entropy Temperature), управление генерацией и Activation Steering.
 
-## [x] Шаг 18: Интеграция XTC Sampling и min_new_tokens
-**Цель:** Добавление метода XTC (Exclude Top Choices) Sampling для подавления наиболее вероятных токенов (увеличение разнообразия) и поддержка аргумента `min_new_tokens` для ограничения минимальной длины генерации.
+## [x] Завершенные этапы (Шаг 18)
+**Цель:** Интеграция XTC Sampling (исключение топ-выбора) и аргумента `min_new_tokens` для контроля минимальной длины генерации.
+
+## [x] Шаг 19: Добавление no_repeat_ngram_size
+**Цель:** Добавление штрафа на повторение N-грамм (n-gram repetition penalty) для улучшения качества текста путем предотвращения зацикливаний.
 * **Детали реализации:**
-  * Добавить аргументы `xtc_threshold: float = 0.0`, `xtc_probability: float = 0.0` и `min_new_tokens: Optional[int] = None` в функцию `generate` (`src/models/diffusion/modeling_diffusion.py`).
-  * Реализовать логику `min_new_tokens`: если сгенерировано меньше токенов, чем `min_new_tokens`, приравнивать вероятность `eos_token_id` к `-inf`.
-  * Реализовать логику XTC: если вероятность самого вероятного токена превышает `xtc_threshold`, то с вероятностью `xtc_probability` исключать его из распределения (присваивая `-inf`).
-  * Написать тесты `test_xtc_sampling` и `test_min_new_tokens` в `tests/test_diffusion.py` для обеспечения полного покрытия нового кода.
+  * Добавить аргумент `no_repeat_ngram_size: int = 0` в метод `generate` в `src/models/diffusion/modeling_diffusion.py`.
+  * Внутри цикла генерации (после применения других штрафов) извлекать сгенерированные последовательности (n-граммы) и приравнивать вероятность следующего токена к `-inf`, если добавление токена приведет к повторению (n-1)-граммы, которая уже встречалась в сгенерированном блоке.
+  * Написать тест `test_no_repeat_ngram_size` в `tests/test_diffusion.py` для обеспечения покрытия нового кода.

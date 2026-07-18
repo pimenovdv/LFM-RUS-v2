@@ -197,6 +197,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         xtc_threshold: float = 0.0,
         xtc_probability: float = 0.0,
         min_new_tokens: Optional[int] = None,
+        no_repeat_ngram_size: int = 0,
         logit_bias: Optional[dict[int, float]] = None,
         suppress_tokens: Optional[list[int]] = None,
         remasking: Optional[str] = None,
@@ -321,6 +322,29 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     top_k_val = min(max(top_k, 1), logits.size(-1))
                     indices_to_remove = logits < torch.topk(logits, top_k_val, dim=-1)[0][..., -1, None]
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                if no_repeat_ngram_size > 0:
+                    for b in range(batch_size):
+                        seq = x[b, :block_end]
+                        for pos in range(block_start, block_end):
+                            if pos < no_repeat_ngram_size - 1:
+                                continue
+
+                            prev_tokens = seq[pos - (no_repeat_ngram_size - 1):pos]
+                            if mask_id not in prev_tokens:
+                                prefix_list = prev_tokens.tolist()
+                                banned_tokens = set()
+
+                                for start_idx in range(pos - no_repeat_ngram_size + 1):
+                                    window = seq[start_idx:start_idx + no_repeat_ngram_size - 1].tolist()
+                                    if window == prefix_list:
+                                        next_token = seq[start_idx + no_repeat_ngram_size - 1].item()
+                                        if next_token != mask_id:
+                                            banned_tokens.add(next_token)
+
+                                if banned_tokens:
+                                    for bt in banned_tokens:
+                                        logits[b, pos, bt] = -float("Inf")
 
                 if repetition_penalty != 1.0 or frequency_penalty != 0.0 or presence_penalty != 0.0:
                     # Apply penalties to already generated/unmasked tokens
