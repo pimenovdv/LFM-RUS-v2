@@ -198,6 +198,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         xtc_probability: float = 0.0,
         min_new_tokens: Optional[int] = None,
         no_repeat_ngram_size: int = 0,
+        bad_words_ids: Optional[list[list[int]]] = None,
         logit_bias: Optional[dict[int, float]] = None,
         suppress_tokens: Optional[list[int]] = None,
         remasking: Optional[str] = None,
@@ -345,6 +346,22 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                 if banned_tokens:
                                     for bt in banned_tokens:
                                         logits[b, pos, bt] = -float("Inf")
+
+                if bad_words_ids is not None:
+                    for b in range(batch_size):
+                        for pos in range(block_start, block_end):
+                            for bad_word in bad_words_ids:
+                                if not bad_word:
+                                    continue
+                                if len(bad_word) == 1:
+                                    logits[b, pos, bad_word[0]] = -float("Inf")
+                                else:
+                                    prefix_len = len(bad_word) - 1
+                                    if pos >= prefix_len:
+                                        prev_tokens = x[b, pos - prefix_len : pos]
+                                        if mask_id not in prev_tokens:
+                                            if prev_tokens.tolist() == bad_word[:-1]:
+                                                logits[b, pos, bad_word[-1]] = -float("Inf")
 
                 if repetition_penalty != 1.0 or frequency_penalty != 0.0 or presence_penalty != 0.0:
                     # Apply penalties to already generated/unmasked tokens
