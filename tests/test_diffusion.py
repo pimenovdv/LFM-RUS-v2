@@ -501,3 +501,105 @@ def test_no_repeat_ngram_size(mocker):
 
         assert outputs[0, -1].item() != 3
         assert outputs[0, -1].item() == 4
+
+def test_bad_words_ids(mocker):
+    # Setup mock to simulate model unmasking and bad_words_ids penalty
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=1, diffusion_steps=2)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.tensor([[1, 2]])
+
+    with torch.no_grad():
+        mock_forward = mocker.patch.object(DiffusionModelForConditionalGeneration, 'forward')
+        vocab_size = 10
+
+        def forward_side_effect(*args, **kwargs):
+            input_seq = kwargs.get('input_ids', args[0] if args else None)
+            seq_len = input_seq.shape[1]
+            out_logits = torch.zeros(1, seq_len, vocab_size)
+            # Give high probability to token 3
+            out_logits[:, -1, 3] = 10.0
+            # Next best is token 4
+            out_logits[:, -1, 4] = 5.0
+
+            mock_out = mocker.MagicMock()
+            mock_out.logits = out_logits
+            return mock_out
+
+        mock_forward.side_effect = forward_side_effect
+
+        bad_words_ids = [[1, 2, 3]]
+
+        outputs = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=1,
+            block_length=1,
+            steps=1,
+            bad_words_ids=bad_words_ids
+        )
+
+        # The sequence is [1, 2, <new token>].
+        # If bad_words_ids is [[1, 2, 3]], then token 3 should be blocked since prefix [1, 2] matches.
+        # So we expect it to fallback to 4.
+        assert outputs[0, -1].item() != 3
+        assert outputs[0, -1].item() == 4
+
+def test_bad_words_ids_single_token(mocker):
+    # Setup mock to simulate model unmasking and bad_words_ids penalty (single token)
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=1, diffusion_steps=2)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.tensor([[1, 2]])
+
+    with torch.no_grad():
+        mock_forward = mocker.patch.object(DiffusionModelForConditionalGeneration, 'forward')
+        vocab_size = 10
+
+        def forward_side_effect(*args, **kwargs):
+            input_seq = kwargs.get('input_ids', args[0] if args else None)
+            seq_len = input_seq.shape[1]
+            out_logits = torch.zeros(1, seq_len, vocab_size)
+            # Give high probability to token 3
+            out_logits[:, -1, 3] = 10.0
+            # Next best is token 4
+            out_logits[:, -1, 4] = 5.0
+
+            mock_out = mocker.MagicMock()
+            mock_out.logits = out_logits
+            return mock_out
+
+        mock_forward.side_effect = forward_side_effect
+
+        # 3 is blocked
+        bad_words_ids = [[3], []]
+
+        outputs = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=1,
+            block_length=1,
+            steps=1,
+            bad_words_ids=bad_words_ids
+        )
+
+        assert outputs[0, -1].item() != 3
+        assert outputs[0, -1].item() == 4

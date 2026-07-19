@@ -2,15 +2,13 @@
 
 Этот документ содержит пошаговый план разработки для интеграции маскированной дискретной диффузии в существующий пайплайн обучения.
 
-## [x] Завершенные этапы (Шаги 1-17)
-**Цель:** Базовая интеграция MDLM, пайплайнов и реализация основных методов сэмплирования (Dynamic CFG, Guidance Rescale, Exponential Schedule, Top-k/p/a, Min-p, Typical, Epsilon, Eta, Penalties, Dynamic Temperature, Early Stopping, TFS, Dynamic Entropy Temperature), управление генерацией и Activation Steering.
+## [x] Завершенные этапы (Шаги 1-19)
+**Цель:** Базовая интеграция MDLM и реализация обширного набора методов генерации: CFG, Guidance Rescale, различные Schedule, Top-k/p/a, Min-p, Typical, Epsilon, Eta, Penalties (включая repetition, frequency, presence), Dynamic Temperature, Early Stopping, TFS, Activation Steering, XTC Sampling, `min_new_tokens` и `no_repeat_ngram_size`.
 
-## [x] Завершенные этапы (Шаг 18)
-**Цель:** Интеграция XTC Sampling (исключение топ-выбора) и аргумента `min_new_tokens` для контроля минимальной длины генерации.
-
-## [x] Шаг 19: Добавление no_repeat_ngram_size
-**Цель:** Добавление штрафа на повторение N-грамм (n-gram repetition penalty) для улучшения качества текста путем предотвращения зацикливаний.
+## [x] Шаг 20: Добавление `bad_words_ids`
+**Цель:** Добавление возможности запрещать генерацию конкретных последовательностей токенов.
 * **Детали реализации:**
-  * Добавить аргумент `no_repeat_ngram_size: int = 0` в метод `generate` в `src/models/diffusion/modeling_diffusion.py`.
-  * Внутри цикла генерации (после применения других штрафов) извлекать сгенерированные последовательности (n-граммы) и приравнивать вероятность следующего токена к `-inf`, если добавление токена приведет к повторению (n-1)-граммы, которая уже встречалась в сгенерированном блоке.
-  * Написать тест `test_no_repeat_ngram_size` в `tests/test_diffusion.py` для обеспечения покрытия нового кода.
+  * Добавить аргумент `bad_words_ids: Optional[list[list[int]]] = None` в метод `generate` в `src/models/diffusion/modeling_diffusion.py`.
+  * Внутри цикла генерации проверять, не является ли уже сгенерированный префикс в текущем блоке началом одной из запрещенных последовательностей.
+  * Если да, то токен, завершающий последовательность (или продолжающий), нужно заблокировать (логит в `-inf`).
+  * Написать тест `test_bad_words_ids` в `tests/test_diffusion.py`.
