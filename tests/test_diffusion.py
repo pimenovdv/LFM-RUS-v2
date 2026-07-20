@@ -603,3 +603,93 @@ def test_bad_words_ids_single_token(mocker):
 
         assert outputs[0, -1].item() != 3
         assert outputs[0, -1].item() == 4
+
+def test_max_time(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=4, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+
+    # Mock to slow down generation loop
+    call_count = 0
+    def forward_side_effect(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        # Each step we advance "time" using mocker
+        return mocker.MagicMock(logits=torch.zeros(1, kwargs["input_ids"].shape[1], 10))
+
+    mock_forward.side_effect = forward_side_effect
+
+    import time
+    mock_time = mocker.patch("time.time")
+
+    # First call is start time, subsequent calls increase time
+    time_values = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    def time_side_effect():
+        if time_values:
+            return time_values.pop(0)
+        return 100.0
+    mock_time.side_effect = time_side_effect
+
+    # We ask for 4 tokens (2 blocks), 2 steps per block
+    # Max time is 1.5. So it should break early in the first block
+    # or between steps.
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=4,
+        steps=4,
+        max_time=1.5
+    )
+
+    # Because max_time is reached very quickly in mock time,
+    # it should call forward fewer times than (blocks * steps) = 2 * 2 = 4
+    assert call_count < 4
+
+def test_remove_invalid_values(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=1, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.zeros(1, seq_len, 10)
+        # Add NaNs and Infs
+        out_logits[0, -1, 0] = float("nan")
+        out_logits[0, -1, 1] = float("inf")
+        out_logits[0, -1, 2] = -float("inf")
+        out_logits[0, -1, 3] = 10.0 # Valid high logit
+
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=1,
+        remove_invalid_values=True
+    )
+
+    # Because remove_invalid_values handles NaNs and Infs, generate shouldn't crash.
+    # Token 1 was set to inf, so its logit gets set to torch.finfo(float32).max.
+    # This becomes the highest value and gets selected by argmax sampling (since temperature is 0).
+    assert outputs[0, -1].item() == 1

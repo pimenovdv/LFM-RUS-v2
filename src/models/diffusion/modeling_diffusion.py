@@ -4,6 +4,7 @@ from transformers import PreTrainedModel, AutoConfig, AutoModel
 import torch.nn.functional as F
 from typing import Optional, Tuple, Union, List
 import numpy as np
+import time
 
 from .configuration_diffusion import DiffusionConfig
 
@@ -199,6 +200,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         min_new_tokens: Optional[int] = None,
         no_repeat_ngram_size: int = 0,
         bad_words_ids: Optional[list[list[int]]] = None,
+        max_time: Optional[float] = None,
+        remove_invalid_values: bool = False,
         logit_bias: Optional[dict[int, float]] = None,
         suppress_tokens: Optional[list[int]] = None,
         remasking: Optional[str] = None,
@@ -214,6 +217,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         """
         Iterative unmasking generation for Diffusion Models.
         """
+        start_time = time.time() if max_time is not None else None
+
         steps = steps or self.config.diffusion_steps
         block_length = block_length or self.config.block_size
         remasking = remasking or self.config.remasking_strategy
@@ -239,6 +244,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         x[:, :T] = input_ids
 
         for num_block in range(num_blocks):
+            if max_time is not None and time.time() - start_time > max_time:
+                break
+
             block_start = T + num_block * block_length
             block_end = T + (num_block + 1) * block_length
 
@@ -246,6 +254,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
             num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block)
 
             for i in range(steps_per_block):
+                if max_time is not None and time.time() - start_time > max_time:
+                    break
+
                 step_ratio = i / max(1, steps_per_block - 1) if steps_per_block > 1 else 0.0
 
                 mask_index = (x == mask_id)
@@ -264,6 +275,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     steering_scale=steering_scale
                 )
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+
+                if remove_invalid_values:
+                    # set all nan values to 0.0
+                    logits = torch.where(logits != logits, 0.0, logits)
+                    # set all +/-inf values to max/min possible value
+                    logits = torch.where(logits == float("inf"), torch.finfo(logits.dtype).max, logits)
+                    logits = torch.where(logits == -float("inf"), torch.finfo(logits.dtype).min, logits)
 
                 if cfg_scale > 0.0 and unconditional_input_ids is not None:
                     if cfg_schedule == "linear":
