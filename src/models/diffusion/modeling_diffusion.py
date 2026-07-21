@@ -212,6 +212,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         steering_scale: float = 1.0,
         eos_token_id: Optional[int] = None,
         pad_token_id: Optional[int] = None,
+        forced_decoder_ids: Optional[list[list[int]]] = None,
+        forced_eos_token_id: Optional[int] = None,
+        renormalize_logits: bool = False,
         **kwargs
     ):
         """
@@ -242,6 +245,16 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         x = torch.full((batch_size, T + max_new_tokens), mask_id, dtype=dtype, device=device)
         x[:, :T] = input_ids
+
+        if forced_decoder_ids is not None:
+            for forced_id in forced_decoder_ids:
+                if len(forced_id) == 2:
+                    idx, token = forced_id
+                    if 0 <= idx < max_new_tokens:
+                        x[:, T + idx] = token
+
+        if forced_eos_token_id is not None:
+            x[:, T + max_new_tokens - 1] = forced_eos_token_id
 
         for num_block in range(num_blocks):
             if max_time is not None and time.time() - start_time > max_time:
@@ -554,6 +567,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_temperature = torch.clamp(current_temperature, min=min_temperature)
                     else:
                         current_temperature = max(current_temperature, min_temperature)
+
+                if renormalize_logits:
+                    logits = logits - logits.logsumexp(dim=-1, keepdim=True)
 
                 # Check if current_temperature is > 0 (can be a tensor or float)
                 is_temp_positive = (current_temperature > 0).any() if isinstance(current_temperature, torch.Tensor) else (current_temperature > 0)

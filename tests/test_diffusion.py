@@ -693,3 +693,108 @@ def test_remove_invalid_values(mocker):
     # Token 1 was set to inf, so its logit gets set to torch.finfo(float32).max.
     # This becomes the highest value and gets selected by argmax sampling (since temperature is 0).
     assert outputs[0, -1].item() == 1
+
+def test_forced_decoder_ids(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=1, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.zeros(1, seq_len, 10)
+        # make token 5 highly probable for the non-forced position
+        out_logits[0, -2, 5] = 10.0
+        # for forced position, it doesn't matter since it is unmasked
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=2,
+        steps=1,
+        forced_decoder_ids=[[1, 9]] # Force token 9 at relative index 1
+    )
+
+    # Output should have forced token at the end
+    assert outputs[0, 2].item() == 5
+    assert outputs[0, 3].item() == 9
+
+def test_forced_eos_token_id(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=1, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.zeros(1, seq_len, 10)
+        out_logits[0, -2, 5] = 10.0
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=2,
+        steps=1,
+        forced_eos_token_id=8
+    )
+
+    # Output should end with eos token 8
+    assert outputs[0, -1].item() == 8
+
+def test_renormalize_logits(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=1, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.zeros(1, seq_len, 10)
+        out_logits[0, -1, 4] = 20.0
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=1,
+        renormalize_logits=True
+    )
+
+    # Token 4 should still be the highest probability token, so it gets generated.
+    assert outputs[0, -1].item() == 4
