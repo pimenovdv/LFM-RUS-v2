@@ -187,6 +187,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         top_p: float = 1.0,
         min_p: float = 0.0,
         typical_p: float = 1.0,
+        typical_p_schedule: str = "constant",
+        min_typical_p: float = 0.0,
         top_a: float = 0.0,
         epsilon_cutoff: float = 0.0,
         eta_cutoff: float = 0.0,
@@ -530,7 +532,20 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                current_typical_p = typical_p
                 if typical_p < 1.0:
+                    if typical_p_schedule == "linear":
+                        current_typical_p = typical_p * (1.0 - step_ratio)
+                    elif typical_p_schedule == "cosine":
+                        import math
+                        current_typical_p = typical_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif typical_p_schedule == "exponential":
+                        import math
+                        current_typical_p = typical_p * math.exp(-3.0 * step_ratio)
+
+                    current_typical_p = max(current_typical_p, min_typical_p)
+
+                if typical_p < 1.0 and current_typical_p < 1.0:
                     probs = F.softmax(logits, dim=-1)
                     entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
                     shifted_entropy = torch.abs(-torch.log(probs + 1e-9) - entropy)
@@ -539,7 +554,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     sorted_probs = torch.gather(probs, -1, sorted_indices)
                     cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
 
-                    sorted_indices_to_remove = cumulative_probs > typical_p
+                    sorted_indices_to_remove = cumulative_probs > current_typical_p
                     sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
                     sorted_indices_to_remove[..., 0] = 0
 

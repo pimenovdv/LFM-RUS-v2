@@ -250,3 +250,91 @@ def test_early_stopping_eos(dummy_model, mocker):
     assert out[0, seq_len].item() == eos_token_id
     # The second token generated (index 5) should be pad_token_id
     assert out[0, seq_len + 1].item() == pad_token_id
+
+def test_forced_decoder_ids(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    # Force token 42 at relative index 0, and token 43 at relative index 1
+    forced_decoder_ids = [[0, 42], [1, 43]]
+
+    out = dummy_model.generate(
+        input_ids,
+        max_new_tokens=4,
+        steps=2,
+        forced_decoder_ids=forced_decoder_ids
+    )
+
+    assert out.shape == (batch_size, seq_len + 4)
+    assert torch.all(out[:, seq_len] == 42).item()
+    assert torch.all(out[:, seq_len + 1] == 43).item()
+
+def test_forced_eos_token_id(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    forced_eos_token_id = 99
+    max_new_tokens = 4
+
+    out = dummy_model.generate(
+        input_ids,
+        max_new_tokens=max_new_tokens,
+        steps=2,
+        forced_eos_token_id=forced_eos_token_id
+    )
+
+    assert out.shape == (batch_size, seq_len + max_new_tokens)
+    assert torch.all(out[:, -1] == forced_eos_token_id).item()
+
+def test_renormalize_logits(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        renormalize_logits=True
+    )
+
+    assert out.shape == (batch_size, seq_len + 2)
+
+
+def test_dynamic_typical_p_schedule(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_linear = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        typical_p=0.9,
+        typical_p_schedule="linear",
+        min_typical_p=0.1
+    )
+
+    out_cosine = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        typical_p=0.9,
+        typical_p_schedule="cosine",
+        min_typical_p=0.1
+    )
+
+    out_exponential = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        typical_p=0.9,
+        typical_p_schedule="exponential",
+        min_typical_p=0.1
+    )
+
+    assert out_linear.shape == (batch_size, seq_len + 2)
+    assert out_cosine.shape == (batch_size, seq_len + 2)
+    assert out_exponential.shape == (batch_size, seq_len + 2)
