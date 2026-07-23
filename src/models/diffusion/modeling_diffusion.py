@@ -185,6 +185,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         guidance_rescale: float = 0.0,
         top_k: int = 0,
         top_p: float = 1.0,
+        top_p_schedule: str = "constant",
+        min_top_p: float = 0.0,
         min_p: float = 0.0,
         typical_p: float = 1.0,
         typical_p_schedule: str = "constant",
@@ -452,12 +454,25 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                     logits = logits.masked_fill(xtc_mask, -float("Inf"))
 
+                current_top_p = top_p
                 if top_p < 1.0:
+                    if top_p_schedule == "linear":
+                        current_top_p = top_p * (1.0 - step_ratio)
+                    elif top_p_schedule == "cosine":
+                        import math
+                        current_top_p = top_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif top_p_schedule == "exponential":
+                        import math
+                        current_top_p = top_p * math.exp(-3.0 * step_ratio)
+
+                    current_top_p = max(current_top_p, min_top_p)
+
+                if current_top_p < 1.0:
                     sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
                     cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
 
                     # Remove tokens with cumulative probability above the threshold
-                    sorted_indices_to_remove = cumulative_probs > top_p
+                    sorted_indices_to_remove = cumulative_probs > current_top_p
                     # Shift the indices to the right to keep also the first token above the threshold
                     sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
                     sorted_indices_to_remove[..., 0] = 0
