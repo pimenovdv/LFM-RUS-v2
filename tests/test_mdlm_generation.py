@@ -219,6 +219,80 @@ def test_dynamic_temperature_schedule(dummy_model):
     assert out_exponential.shape == (batch_size, seq_len + 2)
 
 
+def test_dynamic_top_k_schedule(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_linear = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        top_k=50,
+        top_k_schedule="linear",
+        min_top_k=5
+    )
+
+    out_cosine = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        top_k=50,
+        top_k_schedule="cosine",
+        min_top_k=5
+    )
+
+    out_exponential = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        top_k=50,
+        top_k_schedule="exponential",
+        min_top_k=5
+    )
+
+    assert out_linear.shape == (batch_size, seq_len + 2)
+    assert out_cosine.shape == (batch_size, seq_len + 2)
+    assert out_exponential.shape == (batch_size, seq_len + 2)
+
+
+def test_dynamic_min_p_schedule(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_linear = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        min_p=0.9,
+        min_p_schedule="linear",
+        min_min_p=0.1
+    )
+
+    out_cosine = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        min_p=0.9,
+        min_p_schedule="cosine",
+        min_min_p=0.1
+    )
+
+    out_exponential = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        min_p=0.9,
+        min_p_schedule="exponential",
+        min_min_p=0.1
+    )
+
+    assert out_linear.shape == (batch_size, seq_len + 2)
+    assert out_cosine.shape == (batch_size, seq_len + 2)
+    assert out_exponential.shape == (batch_size, seq_len + 2)
+
+
 def test_dynamic_top_p_schedule(dummy_model):
     batch_size = 2
     seq_len = 4
