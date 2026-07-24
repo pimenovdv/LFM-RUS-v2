@@ -184,10 +184,14 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         cfg_schedule: str = "constant",
         guidance_rescale: float = 0.0,
         top_k: int = 0,
+        top_k_schedule: str = "constant",
+        min_top_k: int = 0,
         top_p: float = 1.0,
         top_p_schedule: str = "constant",
         min_top_p: float = 0.0,
         min_p: float = 0.0,
+        min_p_schedule: str = "constant",
+        min_min_p: float = 0.0,
         typical_p: float = 1.0,
         typical_p_schedule: str = "constant",
         min_typical_p: float = 0.0,
@@ -354,8 +358,21 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     for token_id, bias in logit_bias.items():
                         logits[:, :, token_id] += bias
 
+                current_top_k = top_k
                 if top_k > 0:
-                    top_k_val = min(max(top_k, 1), logits.size(-1))
+                    if top_k_schedule == "linear":
+                        current_top_k = int(top_k * (1.0 - step_ratio))
+                    elif top_k_schedule == "cosine":
+                        import math
+                        current_top_k = int(top_k * 0.5 * (1.0 + math.cos(math.pi * step_ratio)))
+                    elif top_k_schedule == "exponential":
+                        import math
+                        current_top_k = int(top_k * math.exp(-3.0 * step_ratio))
+
+                    current_top_k = max(current_top_k, min_top_k)
+
+                if current_top_k > 0:
+                    top_k_val = min(max(current_top_k, 1), logits.size(-1))
                     indices_to_remove = logits < torch.topk(logits, top_k_val, dim=-1)[0][..., -1, None]
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
@@ -480,10 +497,23 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                current_min_p = min_p
                 if min_p > 0.0:
+                    if min_p_schedule == "linear":
+                        current_min_p = min_p * (1.0 - step_ratio)
+                    elif min_p_schedule == "cosine":
+                        import math
+                        current_min_p = min_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif min_p_schedule == "exponential":
+                        import math
+                        current_min_p = min_p * math.exp(-3.0 * step_ratio)
+
+                    current_min_p = max(current_min_p, min_min_p)
+
+                if current_min_p > 0.0:
                     probs = F.softmax(logits, dim=-1)
                     max_probs = probs.max(dim=-1, keepdim=True).values
-                    indices_to_remove = probs < (min_p * max_probs)
+                    indices_to_remove = probs < (current_min_p * max_probs)
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
                 if top_a > 0.0:
