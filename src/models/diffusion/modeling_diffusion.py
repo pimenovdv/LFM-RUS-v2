@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from typing import Optional, Tuple, Union, List
 import numpy as np
 import time
+import math
 
 from .configuration_diffusion import DiffusionConfig
 
@@ -196,9 +197,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         typical_p_schedule: str = "constant",
         min_typical_p: float = 0.0,
         top_a: float = 0.0,
+        top_a_schedule: str = "constant",
+        min_top_a: float = 0.0,
         epsilon_cutoff: float = 0.0,
         eta_cutoff: float = 0.0,
         tfs_z: float = 1.0,
+        tfs_z_schedule: str = "constant",
+        min_tfs_z: float = 1.0,
         dynamic_temperature_entropy: float = 0.0,
         repetition_penalty: float = 1.0,
         frequency_penalty: float = 0.0,
@@ -308,10 +313,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if cfg_schedule == "linear":
                         current_cfg_scale = cfg_scale * (1.0 - step_ratio)
                     elif cfg_schedule == "cosine":
-                        import math
+
                         current_cfg_scale = cfg_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif cfg_schedule == "exponential":
-                        import math
+
                         current_cfg_scale = cfg_scale * math.exp(-3.0 * step_ratio)
                     else:
                         current_cfg_scale = cfg_scale
@@ -363,10 +368,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if top_k_schedule == "linear":
                         current_top_k = int(top_k * (1.0 - step_ratio))
                     elif top_k_schedule == "cosine":
-                        import math
+
                         current_top_k = int(top_k * 0.5 * (1.0 + math.cos(math.pi * step_ratio)))
                     elif top_k_schedule == "exponential":
-                        import math
+
                         current_top_k = int(top_k * math.exp(-3.0 * step_ratio))
 
                     current_top_k = max(current_top_k, min_top_k)
@@ -476,10 +481,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if top_p_schedule == "linear":
                         current_top_p = top_p * (1.0 - step_ratio)
                     elif top_p_schedule == "cosine":
-                        import math
+
                         current_top_p = top_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif top_p_schedule == "exponential":
-                        import math
+
                         current_top_p = top_p * math.exp(-3.0 * step_ratio)
 
                     current_top_p = max(current_top_p, min_top_p)
@@ -502,10 +507,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if min_p_schedule == "linear":
                         current_min_p = min_p * (1.0 - step_ratio)
                     elif min_p_schedule == "cosine":
-                        import math
+
                         current_min_p = min_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif min_p_schedule == "exponential":
-                        import math
+
                         current_min_p = min_p * math.exp(-3.0 * step_ratio)
 
                     current_min_p = max(current_min_p, min_min_p)
@@ -516,10 +521,23 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     indices_to_remove = probs < (current_min_p * max_probs)
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                current_top_a = top_a
                 if top_a > 0.0:
+                    if top_a_schedule == "linear":
+                        current_top_a = top_a * (1.0 - step_ratio)
+                    elif top_a_schedule == "cosine":
+
+                        current_top_a = top_a * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif top_a_schedule == "exponential":
+
+                        current_top_a = top_a * math.exp(-3.0 * step_ratio)
+
+                    current_top_a = max(current_top_a, min_top_a)
+
+                if top_a > 0.0 and current_top_a > 0.0:
                     probs = F.softmax(logits, dim=-1)
                     max_probs = probs.max(dim=-1, keepdim=True).values
-                    limit = top_a * (max_probs ** 2)
+                    limit = current_top_a * (max_probs ** 2)
                     indices_to_remove = probs < limit
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
@@ -540,7 +558,23 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     indices_to_remove = probs < threshold
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
-                if tfs_z < 1.0:
+                current_tfs_z = tfs_z
+                if tfs_z < 1.0 or min_tfs_z < 1.0:
+                    if tfs_z_schedule == "linear":
+                        current_tfs_z = tfs_z + (min_tfs_z - tfs_z) * step_ratio
+                    elif tfs_z_schedule == "cosine":
+
+                        current_tfs_z = min_tfs_z + (tfs_z - min_tfs_z) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif tfs_z_schedule == "exponential":
+
+                        # for tfs_z which usually goes towards 1.0 (less cutoff)
+                        # or from 1.0 to tfs_z, we use a simple exp interpolation
+                        current_tfs_z = min_tfs_z + (tfs_z - min_tfs_z) * math.exp(-3.0 * step_ratio)
+
+                    # Limit the value between min and max of (tfs_z, min_tfs_z)
+                    current_tfs_z = max(min(current_tfs_z, max(tfs_z, min_tfs_z)), min(tfs_z, min_tfs_z))
+
+                if (tfs_z < 1.0 or min_tfs_z < 1.0) and current_tfs_z < 1.0:
                     probs = F.softmax(logits, dim=-1)
                     sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
 
@@ -582,10 +616,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if typical_p_schedule == "linear":
                         current_typical_p = typical_p * (1.0 - step_ratio)
                     elif typical_p_schedule == "cosine":
-                        import math
+
                         current_typical_p = typical_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif typical_p_schedule == "exponential":
-                        import math
+
                         current_typical_p = typical_p * math.exp(-3.0 * step_ratio)
 
                     current_typical_p = max(current_typical_p, min_typical_p)
@@ -611,10 +645,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if temperature_schedule == "linear":
                         current_temperature = temperature * (1.0 - step_ratio)
                     elif temperature_schedule == "cosine":
-                        import math
+
                         current_temperature = temperature * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif temperature_schedule == "exponential":
-                        import math
+
                         current_temperature = temperature * math.exp(-3.0 * step_ratio)
 
                     if dynamic_temperature_entropy > 0.0:
