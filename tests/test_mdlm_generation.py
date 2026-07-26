@@ -522,3 +522,65 @@ def test_dynamic_tfs_z_schedule(dummy_model):
     assert out_linear.shape == (batch_size, seq_len + 2)
     assert out_cosine.shape == (batch_size, seq_len + 2)
     assert out_exponential.shape == (batch_size, seq_len + 2)
+
+def test_dynamic_tkg_schedule(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+    uncond_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_linear = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        tkg_scale=2.0,
+        tkg_schedule="linear",
+        tkg_min_scale=0.1,
+        unconditional_input_ids=uncond_ids,
+        top_k=5
+    )
+
+    out_cosine = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        tkg_scale=2.0,
+        tkg_schedule="cosine",
+        tkg_min_scale=0.1,
+        unconditional_input_ids=uncond_ids,
+        top_k=5
+    )
+
+    out_exponential = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        tkg_scale=2.0,
+        tkg_schedule="exponential",
+        tkg_min_scale=0.1,
+        unconditional_input_ids=uncond_ids,
+        top_k=5
+    )
+
+    assert out_linear.shape == (batch_size, seq_len + 2)
+    assert out_cosine.shape == (batch_size, seq_len + 2)
+    assert out_exponential.shape == (batch_size, seq_len + 2)
+
+def test_generate_tkg_and_cfg_combined(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+    uncond_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_combined = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        cfg_scale=1.5,
+        tkg_scale=2.0,
+        top_k=10,
+        unconditional_input_ids=uncond_ids,
+        guidance_rescale=0.7
+    )
+
+    assert out_combined.shape == (batch_size, seq_len + 2)

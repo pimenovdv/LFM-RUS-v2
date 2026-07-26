@@ -210,6 +210,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         presence_penalty: float = 0.0,
         xtc_threshold: float = 0.0,
         xtc_probability: float = 0.0,
+        tkg_scale: float = 0.0,
+        tkg_schedule: str = "constant",
+        tkg_min_scale: float = 0.0,
         min_new_tokens: Optional[int] = None,
         no_repeat_ngram_size: int = 0,
         bad_words_ids: Optional[list[list[int]]] = None,
@@ -309,25 +312,21 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     logits = torch.where(logits == float("inf"), torch.finfo(logits.dtype).max, logits)
                     logits = torch.where(logits == -float("inf"), torch.finfo(logits.dtype).min, logits)
 
-                if cfg_scale > 0.0 and unconditional_input_ids is not None:
-                    if cfg_schedule == "linear":
-                        current_cfg_scale = cfg_scale * (1.0 - step_ratio)
-                    elif cfg_schedule == "cosine":
+                current_top_k = top_k
+                if top_k > 0:
+                    if top_k_schedule == "linear":
+                        current_top_k = int(top_k * (1.0 - step_ratio))
+                    elif top_k_schedule == "cosine":
+                        current_top_k = int(top_k * 0.5 * (1.0 + math.cos(math.pi * step_ratio)))
+                    elif top_k_schedule == "exponential":
+                        current_top_k = int(top_k * math.exp(-3.0 * step_ratio))
+                    current_top_k = max(current_top_k, min_top_k)
 
-                        current_cfg_scale = cfg_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
-                    elif cfg_schedule == "exponential":
-
-                        current_cfg_scale = cfg_scale * math.exp(-3.0 * step_ratio)
-                    else:
-                        current_cfg_scale = cfg_scale
-
+                if (cfg_scale > 0.0 or tkg_scale > 0.0) and unconditional_input_ids is not None:
                     uncond_x = x.clone()
                     # Replace the conditional prefix with unconditional prefix
-                    # Assume unconditional_input_ids length <= T
                     uncond_len = unconditional_input_ids.size(1)
                     uncond_x[:, :uncond_len] = unconditional_input_ids
-                    # If uncond_len < T, we might want to pad it with mask_id or leave original,
-                    # standard CFG assumes same sequence length prefix
 
                     uncond_outputs = self(
                         input_ids=uncond_x,
@@ -339,9 +338,38 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     )
                     uncond_logits = uncond_outputs.logits if hasattr(uncond_outputs, "logits") else uncond_outputs[0]
 
-                    guided_logits = uncond_logits + current_cfg_scale * (logits - uncond_logits)
+                    guided_logits = logits.clone()
 
-                    if guidance_rescale > 0.0:
+                    if cfg_scale > 0.0:
+                        if cfg_schedule == "linear":
+                            current_cfg_scale = cfg_scale * (1.0 - step_ratio)
+                        elif cfg_schedule == "cosine":
+                            current_cfg_scale = cfg_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                        elif cfg_schedule == "exponential":
+                            current_cfg_scale = cfg_scale * math.exp(-3.0 * step_ratio)
+                        else:
+                            current_cfg_scale = cfg_scale
+
+                        guided_logits = uncond_logits + current_cfg_scale * (logits - uncond_logits)
+
+                    if tkg_scale > 0.0 and current_top_k > 0:
+                        if tkg_schedule == "linear":
+                            current_tkg_scale = tkg_scale * (1.0 - step_ratio)
+                        elif tkg_schedule == "cosine":
+                            current_tkg_scale = tkg_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                        elif tkg_schedule == "exponential":
+                            current_tkg_scale = tkg_scale * math.exp(-3.0 * step_ratio)
+                        else:
+                            current_tkg_scale = tkg_scale
+
+                        current_tkg_scale = max(current_tkg_scale, tkg_min_scale)
+
+                        top_k_val = min(max(current_top_k, 1), logits.size(-1))
+                        top_k_thresholds = torch.topk(logits, top_k_val, dim=-1)[0][..., -1, None]
+                        mask = logits >= top_k_thresholds
+                        guided_logits = guided_logits + current_tkg_scale * (logits - uncond_logits) * mask.float()
+
+                    if guidance_rescale > 0.0 and (cfg_scale > 0.0 or tkg_scale > 0.0):
                         std_logits = logits.std(dim=-1, keepdim=True)
                         std_guided_logits = guided_logits.std(dim=-1, keepdim=True)
                         # Fix out of bounds if standard deviation is exactly 0 to avoid NaNs
@@ -362,19 +390,6 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 if logit_bias is not None:
                     for token_id, bias in logit_bias.items():
                         logits[:, :, token_id] += bias
-
-                current_top_k = top_k
-                if top_k > 0:
-                    if top_k_schedule == "linear":
-                        current_top_k = int(top_k * (1.0 - step_ratio))
-                    elif top_k_schedule == "cosine":
-
-                        current_top_k = int(top_k * 0.5 * (1.0 + math.cos(math.pi * step_ratio)))
-                    elif top_k_schedule == "exponential":
-
-                        current_top_k = int(top_k * math.exp(-3.0 * step_ratio))
-
-                    current_top_k = max(current_top_k, min_top_k)
 
                 if current_top_k > 0:
                     top_k_val = min(max(current_top_k, 1), logits.size(-1))
