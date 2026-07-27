@@ -184,6 +184,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         cfg_scale: float = 0.0,
         cfg_schedule: str = "constant",
         guidance_rescale: float = 0.0,
+        guidance_rescale_schedule: str = "constant",
+        min_guidance_rescale: float = 0.0,
         top_k: int = 0,
         top_k_schedule: str = "constant",
         min_top_k: int = 0,
@@ -370,6 +372,17 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         guided_logits = guided_logits + current_tkg_scale * (logits - uncond_logits) * mask.float()
 
                     if guidance_rescale > 0.0 and (cfg_scale > 0.0 or tkg_scale > 0.0):
+                        if guidance_rescale_schedule == "linear":
+                            current_guidance_rescale = guidance_rescale * (1.0 - step_ratio)
+                        elif guidance_rescale_schedule == "cosine":
+                            current_guidance_rescale = guidance_rescale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                        elif guidance_rescale_schedule == "exponential":
+                            current_guidance_rescale = guidance_rescale * math.exp(-3.0 * step_ratio)
+                        else:
+                            current_guidance_rescale = guidance_rescale
+
+                        current_guidance_rescale = max(current_guidance_rescale, min_guidance_rescale)
+
                         std_logits = logits.std(dim=-1, keepdim=True)
                         std_guided_logits = guided_logits.std(dim=-1, keepdim=True)
                         # Fix out of bounds if standard deviation is exactly 0 to avoid NaNs
@@ -377,8 +390,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                         guided_logits_rescaled = guided_logits * (std_logits / std_guided_logits)
                         guided_logits = (
-                            guided_logits_rescaled * guidance_rescale
-                            + guided_logits * (1.0 - guidance_rescale)
+                            guided_logits_rescaled * current_guidance_rescale
+                            + guided_logits * (1.0 - current_guidance_rescale)
                         )
 
                     # Column normalization
