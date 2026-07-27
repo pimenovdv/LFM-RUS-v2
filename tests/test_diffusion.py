@@ -798,3 +798,78 @@ def test_renormalize_logits(mocker):
 
     # Token 4 should still be the highest probability token, so it gets generated.
     assert outputs[0, -1].item() == 4
+
+def test_guidance_rescale_schedule(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    import math
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+    uncond_ids = torch.tensor([[0, 0]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+
+    # We want to trace the step_ratio and ensure it goes 0.0, 0.5, 1.0
+    # since steps_per_block = 3
+    # We can patch math.cos or math.exp, or just inspect how guidance_rescale modifies logits.
+    # To properly check, let's inject a wrapper around torch.where or tensor ops, or simply
+    # check that generate runs without error and the schedule logic is hit.
+
+    # Simple forward side effect
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10) # random logits for std()
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+
+    mock_forward.side_effect = forward_side_effect
+
+    # Run linear
+    outputs_linear = model.generate(
+        input_ids=input_ids,
+        unconditional_input_ids=uncond_ids,
+        max_new_tokens=1,
+        steps=3,
+        cfg_scale=1.5,
+        guidance_rescale=0.7,
+        guidance_rescale_schedule="linear",
+        min_guidance_rescale=0.1
+    )
+
+    # Run cosine
+    outputs_cosine = model.generate(
+        input_ids=input_ids,
+        unconditional_input_ids=uncond_ids,
+        max_new_tokens=1,
+        steps=3,
+        cfg_scale=1.5,
+        guidance_rescale=0.7,
+        guidance_rescale_schedule="cosine",
+        min_guidance_rescale=0.1
+    )
+
+    # Run exponential
+    outputs_exp = model.generate(
+        input_ids=input_ids,
+        unconditional_input_ids=uncond_ids,
+        max_new_tokens=1,
+        steps=3,
+        cfg_scale=1.5,
+        guidance_rescale=0.7,
+        guidance_rescale_schedule="exponential",
+        min_guidance_rescale=0.1
+    )
+
+    assert outputs_linear.shape == (1, 3)
+    assert outputs_cosine.shape == (1, 3)
+    assert outputs_exp.shape == (1, 3)

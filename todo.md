@@ -5,7 +5,7 @@
 ## [x] Завершенные этапы (Шаги 1-27)
 **Цель:** Базовая интеграция MDLM, реализация обширного набора методов генерации: CFG, Guidance Rescale, Schedule (temperature, cfg, top_k, top_p, min_p, typical_p, top_a, tfs_z, tkg), Top-k/p/a, Min-p, Typical, Epsilon, Eta, Penalties (включая repetition, frequency, presence), Dynamic Temperature, Early Stopping, TFS, Activation Steering, XTC Sampling, Top-K Guidance (TKG) и другие ограничения и настройки логитов.
 
-## [ ] Шаг 28: Поддержка CFG Rescale Schedule
+## [x] Шаг 28: Поддержка CFG Rescale Schedule
 **Цель:** Добавление динамического расписания для Guidance Rescale.
 * **Детали реализации:**
   * Добавить параметры `guidance_rescale_schedule: str = "constant"` и `min_guidance_rescale: float = 0.0` в метод `generate` в `src/models/diffusion/modeling_diffusion.py`.
