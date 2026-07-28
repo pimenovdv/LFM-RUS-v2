@@ -873,3 +873,489 @@ def test_guidance_rescale_schedule(mocker):
     assert outputs_linear.shape == (1, 3)
     assert outputs_cosine.shape == (1, 3)
     assert outputs_exp.shape == (1, 3)
+
+def test_penalty_schedules(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+    uncond_ids = torch.tensor([[0, 0]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+
+    # We just want to check that generate passes without error for these schedules
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+
+    mock_forward.side_effect = forward_side_effect
+
+    # Linear
+    outputs_linear = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=3,
+        repetition_penalty=1.5,
+        repetition_penalty_schedule="linear",
+        frequency_penalty=0.5,
+        frequency_penalty_schedule="linear",
+        presence_penalty=0.5,
+        presence_penalty_schedule="linear"
+    )
+    assert outputs_linear is not None
+
+    # Cosine
+    outputs_cosine = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=3,
+        repetition_penalty=1.5,
+        repetition_penalty_schedule="cosine",
+        frequency_penalty=0.5,
+        frequency_penalty_schedule="cosine",
+        presence_penalty=0.5,
+        presence_penalty_schedule="cosine"
+    )
+    assert outputs_cosine is not None
+
+    # Exponential
+    outputs_exp = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=3,
+        repetition_penalty=1.5,
+        repetition_penalty_schedule="exponential",
+        frequency_penalty=0.5,
+        frequency_penalty_schedule="exponential",
+        presence_penalty=0.5,
+        presence_penalty_schedule="exponential"
+    )
+    assert outputs_exp is not None
+
+def test_generate_time_limit(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        import time
+        time.sleep(0.1) # delay to trigger max_time
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=2,
+        steps=6,
+        max_time=0.05
+    )
+    assert outputs is not None
+
+def test_generate_invalid_logits(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        out_logits[0, 0, 0] = float('nan') # inject invalid
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=3,
+        remove_invalid_values=True,
+        renormalize_logits=True
+    )
+    assert outputs is not None
+
+def test_generate_extra_kwargs(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    # We cover branches with forced_decoder_ids, forced_eos_token_id
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=3,
+        forced_decoder_ids=[[0, 5]],
+        forced_eos_token_id=9
+    )
+    assert outputs is not None
+
+def test_generate_cfg_schedules(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+    uncond_ids = torch.tensor([[0, 0]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        unconditional_input_ids=uncond_ids,
+        max_new_tokens=1,
+        steps=3,
+        cfg_scale=1.5,
+        cfg_schedule="cosine",
+        guidance_rescale=0.5,
+        guidance_rescale_schedule="cosine"
+    )
+    assert outputs is not None
+
+def test_generate_tkg_schedules(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=3,
+        tkg_scale=1.5,
+        tkg_schedule="cosine"
+    )
+    assert outputs is not None
+
+def test_generate_steer_vector(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    steer_vec = torch.randn(12)
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=3,
+        steering_vector=steer_vec,
+        steering_layer_name="lm_head"
+    )
+    assert outputs is not None
+
+def test_generate_other_schedules(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=3,
+        min_p=0.1,
+        min_p_schedule="cosine",
+        typical_p=0.9,
+        typical_p_schedule="cosine",
+        top_a=0.5,
+        top_a_schedule="cosine",
+        tfs_z=0.8,
+        tfs_z_schedule="cosine"
+    )
+    assert outputs is not None
+
+def test_generate_min_new_tokens(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=2,
+        steps=6,
+        min_new_tokens=1,
+        eos_token_id=9
+    )
+    assert outputs is not None
+
+def test_generate_bad_words(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=3,
+        bad_words_ids=[[1, 5]]
+    )
+    assert outputs is not None
+
+def test_generate_linear_schedules_coverage(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+    uncond_ids = torch.tensor([[0, 0]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        unconditional_input_ids=uncond_ids,
+        max_new_tokens=1,
+        steps=3,
+        temperature=0.8,
+        temperature_schedule="linear",
+        cfg_scale=1.5,
+        cfg_schedule="linear",
+        guidance_rescale=0.5,
+        guidance_rescale_schedule="linear",
+        top_k=5,
+        top_k_schedule="linear",
+        top_p=0.9,
+        top_p_schedule="linear",
+        min_p=0.1,
+        min_p_schedule="linear",
+        typical_p=0.9,
+        typical_p_schedule="linear",
+        top_a=0.5,
+        top_a_schedule="linear",
+        tfs_z=0.8,
+        tfs_z_schedule="linear",
+        tkg_scale=1.5,
+        tkg_schedule="linear"
+    )
+    assert outputs is not None
+
+def test_generate_exponential_schedules_coverage(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+    uncond_ids = torch.tensor([[0, 0]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        unconditional_input_ids=uncond_ids,
+        max_new_tokens=1,
+        steps=3,
+        temperature=0.8,
+        temperature_schedule="exponential",
+        cfg_scale=1.5,
+        cfg_schedule="exponential",
+        guidance_rescale=0.5,
+        guidance_rescale_schedule="exponential",
+        top_k=5,
+        top_k_schedule="exponential",
+        top_p=0.9,
+        top_p_schedule="exponential",
+        min_p=0.1,
+        min_p_schedule="exponential",
+        typical_p=0.9,
+        typical_p_schedule="exponential",
+        top_a=0.5,
+        top_a_schedule="exponential",
+        tfs_z=0.8,
+        tfs_z_schedule="exponential",
+        tkg_scale=1.5,
+        tkg_schedule="exponential"
+    )
+    assert outputs is not None
