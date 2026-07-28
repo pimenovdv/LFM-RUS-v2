@@ -208,8 +208,14 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         min_tfs_z: float = 1.0,
         dynamic_temperature_entropy: float = 0.0,
         repetition_penalty: float = 1.0,
+        repetition_penalty_schedule: str = "constant",
+        min_repetition_penalty: float = 1.0,
         frequency_penalty: float = 0.0,
+        frequency_penalty_schedule: str = "constant",
+        min_frequency_penalty: float = 0.0,
         presence_penalty: float = 0.0,
+        presence_penalty_schedule: str = "constant",
+        min_presence_penalty: float = 0.0,
         xtc_threshold: float = 0.0,
         xtc_probability: float = 0.0,
         tkg_scale: float = 0.0,
@@ -448,7 +454,37 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                             if prev_tokens.tolist() == bad_word[:-1]:
                                                 logits[b, pos, bad_word[-1]] = -float("Inf")
 
-                if repetition_penalty != 1.0 or frequency_penalty != 0.0 or presence_penalty != 0.0:
+                current_repetition_penalty = repetition_penalty
+                if repetition_penalty != 1.0 and repetition_penalty_schedule != "constant":
+                    if repetition_penalty_schedule == "linear":
+                        current_repetition_penalty = repetition_penalty * (1.0 - step_ratio)
+                    elif repetition_penalty_schedule == "cosine":
+                        current_repetition_penalty = repetition_penalty * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif repetition_penalty_schedule == "exponential":
+                        current_repetition_penalty = repetition_penalty * math.exp(-3.0 * step_ratio)
+                current_repetition_penalty = max(current_repetition_penalty, min_repetition_penalty)
+
+                current_frequency_penalty = frequency_penalty
+                if frequency_penalty != 0.0 and frequency_penalty_schedule != "constant":
+                    if frequency_penalty_schedule == "linear":
+                        current_frequency_penalty = frequency_penalty * (1.0 - step_ratio)
+                    elif frequency_penalty_schedule == "cosine":
+                        current_frequency_penalty = frequency_penalty * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif frequency_penalty_schedule == "exponential":
+                        current_frequency_penalty = frequency_penalty * math.exp(-3.0 * step_ratio)
+                current_frequency_penalty = max(current_frequency_penalty, min_frequency_penalty)
+
+                current_presence_penalty = presence_penalty
+                if presence_penalty != 0.0 and presence_penalty_schedule != "constant":
+                    if presence_penalty_schedule == "linear":
+                        current_presence_penalty = presence_penalty * (1.0 - step_ratio)
+                    elif presence_penalty_schedule == "cosine":
+                        current_presence_penalty = presence_penalty * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif presence_penalty_schedule == "exponential":
+                        current_presence_penalty = presence_penalty * math.exp(-3.0 * step_ratio)
+                current_presence_penalty = max(current_presence_penalty, min_presence_penalty)
+
+                if current_repetition_penalty != 1.0 or current_frequency_penalty != 0.0 or current_presence_penalty != 0.0:
                     # Apply penalties to already generated/unmasked tokens
                     for b in range(batch_size):
                         # Get tokens in the context (ignoring mask tokens)
@@ -458,15 +494,15 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         if valid_context.numel() > 0:
                             unique_tokens, counts = torch.unique(valid_context, return_counts=True)
 
-                            if repetition_penalty != 1.0:
+                            if current_repetition_penalty != 1.0:
                                 score = logits[b, :, unique_tokens]
-                                penalized_score = torch.where(score < 0, score * repetition_penalty, score / repetition_penalty)
+                                penalized_score = torch.where(score < 0, score * current_repetition_penalty, score / current_repetition_penalty)
                                 logits[b, :, unique_tokens] = penalized_score
 
-                            if frequency_penalty != 0.0 or presence_penalty != 0.0:
+                            if current_frequency_penalty != 0.0 or current_presence_penalty != 0.0:
                                 # presence_penalty applies once if the token is present
                                 # frequency_penalty applies proportionally to the count
-                                penalty = (presence_penalty + counts.float() * frequency_penalty).unsqueeze(0)
+                                penalty = (current_presence_penalty + counts.float() * current_frequency_penalty).unsqueeze(0)
                                 logits[b, :, unique_tokens] -= penalty.to(logits.device)
 
                 if min_new_tokens is not None and min_new_tokens > 0 and eos_token_id is not None:
