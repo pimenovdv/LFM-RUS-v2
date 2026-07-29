@@ -584,3 +584,47 @@ def test_generate_tkg_and_cfg_combined(dummy_model):
     )
 
     assert out_combined.shape == (batch_size, seq_len + 2)
+
+def test_dynamic_epsilon_cutoff_schedule(dummy_model):
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    out_linear = dummy_model.generate(
+        input_ids, max_new_tokens=2, steps=2,
+        epsilon_cutoff=0.5, epsilon_cutoff_schedule="linear", min_epsilon_cutoff=0.1
+    )
+
+    out_cosine = dummy_model.generate(
+        input_ids, max_new_tokens=2, steps=2,
+        epsilon_cutoff=0.5, epsilon_cutoff_schedule="cosine", min_epsilon_cutoff=0.1
+    )
+
+    out_exp = dummy_model.generate(
+        input_ids, max_new_tokens=2, steps=2,
+        epsilon_cutoff=0.5, epsilon_cutoff_schedule="exponential", min_epsilon_cutoff=0.1
+    )
+
+    assert out_linear.shape == (1, 5)
+    assert out_cosine.shape == (1, 5)
+    assert out_exp.shape == (1, 5)
+
+def test_dynamic_eta_cutoff_schedule(dummy_model):
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    out_linear = dummy_model.generate(
+        input_ids, max_new_tokens=2, steps=2,
+        eta_cutoff=0.5, eta_cutoff_schedule="linear", min_eta_cutoff=0.1
+    )
+
+    out_cosine = dummy_model.generate(
+        input_ids, max_new_tokens=2, steps=2,
+        eta_cutoff=0.5, eta_cutoff_schedule="cosine", min_eta_cutoff=0.1
+    )
+
+    out_exp = dummy_model.generate(
+        input_ids, max_new_tokens=2, steps=2,
+        eta_cutoff=0.5, eta_cutoff_schedule="exponential", min_eta_cutoff=0.1
+    )
+
+    assert out_linear.shape == (1, 5)
+    assert out_cosine.shape == (1, 5)
+    assert out_exp.shape == (1, 5)

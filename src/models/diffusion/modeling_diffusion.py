@@ -202,7 +202,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         top_a_schedule: str = "constant",
         min_top_a: float = 0.0,
         epsilon_cutoff: float = 0.0,
+        epsilon_cutoff_schedule: str = "constant",
+        min_epsilon_cutoff: float = 0.0,
         eta_cutoff: float = 0.0,
+        eta_cutoff_schedule: str = "constant",
+        min_eta_cutoff: float = 0.0,
         tfs_z: float = 1.0,
         tfs_z_schedule: str = "constant",
         min_tfs_z: float = 1.0,
@@ -605,16 +609,38 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     indices_to_remove = probs < limit
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                current_epsilon = epsilon_cutoff
                 if epsilon_cutoff > 0.0:
+                    if epsilon_cutoff_schedule == "linear":
+                        current_epsilon = epsilon_cutoff * (1.0 - step_ratio)
+                    elif epsilon_cutoff_schedule == "cosine":
+                        current_epsilon = epsilon_cutoff * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif epsilon_cutoff_schedule == "exponential":
+                        current_epsilon = epsilon_cutoff * math.exp(-3.0 * step_ratio)
+
+                    current_epsilon = max(current_epsilon, min_epsilon_cutoff)
+
+                if current_epsilon > 0.0:
                     probs = F.softmax(logits, dim=-1)
-                    indices_to_remove = probs < epsilon_cutoff
+                    indices_to_remove = probs < current_epsilon
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                current_eta = eta_cutoff
                 if eta_cutoff > 0.0:
+                    if eta_cutoff_schedule == "linear":
+                        current_eta = eta_cutoff * (1.0 - step_ratio)
+                    elif eta_cutoff_schedule == "cosine":
+                        current_eta = eta_cutoff * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif eta_cutoff_schedule == "exponential":
+                        current_eta = eta_cutoff * math.exp(-3.0 * step_ratio)
+
+                    current_eta = max(current_eta, min_eta_cutoff)
+
+                if current_eta > 0.0:
                     probs = F.softmax(logits, dim=-1)
                     entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
                     # min(eta_cutoff, sqrt(eta_cutoff) * exp(-entropy))
-                    eta_tensor = torch.tensor(eta_cutoff, device=logits.device, dtype=logits.dtype)
+                    eta_tensor = torch.tensor(current_eta, device=logits.device, dtype=logits.dtype)
                     threshold = torch.minimum(
                         eta_tensor,
                         torch.sqrt(eta_tensor) * torch.exp(-entropy)
