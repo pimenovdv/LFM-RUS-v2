@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import PreTrainedModel, AutoConfig, AutoModel
 import torch.nn.functional as F
-from typing import Optional, Tuple, Union, List
+from typing import Optional
 import numpy as np
 import time
 import math
@@ -159,7 +159,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
             # Calculate loss only on positions where labels != -100 (which corresponds to masked positions)
             loss = loss_fct(logits.view(-1, self.config.base_config_dict.get('vocab_size', logits.size(-1))), labels.view(-1))
 
-        if return_dict := kwargs.get('return_dict', True):
+        return_dict = kwargs.get('return_dict', True)
+        if return_dict:
             from transformers.modeling_outputs import CausalLMOutputWithPast
             return CausalLMOutputWithPast(
                 loss=loss,
@@ -221,7 +222,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         presence_penalty_schedule: str = "constant",
         min_presence_penalty: float = 0.0,
         xtc_threshold: float = 0.0,
+        xtc_threshold_schedule: str = "constant",
+        min_xtc_threshold: float = 0.0,
         xtc_probability: float = 0.0,
+        xtc_probability_schedule: str = "constant",
+        min_xtc_probability: float = 0.0,
         tkg_scale: float = 0.0,
         tkg_schedule: str = "constant",
         tkg_min_scale: float = 0.0,
@@ -516,18 +521,38 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if block_end - T <= min_new_tokens:
                         logits[:, :, eos_token_id] = -float("Inf")
 
-                if xtc_probability > 0.0 and xtc_threshold > 0.0:
+                current_xtc_threshold = xtc_threshold
+                if xtc_threshold > 0.0:
+                    if xtc_threshold_schedule == "linear":
+                        current_xtc_threshold = xtc_threshold * (1.0 - step_ratio)
+                    elif xtc_threshold_schedule == "cosine":
+                        current_xtc_threshold = xtc_threshold * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif xtc_threshold_schedule == "exponential":
+                        current_xtc_threshold = xtc_threshold * math.exp(-3.0 * step_ratio)
+                    current_xtc_threshold = max(current_xtc_threshold, min_xtc_threshold)
+
+                current_xtc_probability = xtc_probability
+                if xtc_probability > 0.0:
+                    if xtc_probability_schedule == "linear":
+                        current_xtc_probability = xtc_probability * (1.0 - step_ratio)
+                    elif xtc_probability_schedule == "cosine":
+                        current_xtc_probability = xtc_probability * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif xtc_probability_schedule == "exponential":
+                        current_xtc_probability = xtc_probability * math.exp(-3.0 * step_ratio)
+                    current_xtc_probability = max(current_xtc_probability, min_xtc_probability)
+
+                if current_xtc_probability > 0.0 and current_xtc_threshold > 0.0:
                     probs = F.softmax(logits, dim=-1)
                     max_probs, max_indices = probs.max(dim=-1, keepdim=True)
 
                     # Create a mask for tokens exceeding the threshold
-                    exceeds_threshold = max_probs > xtc_threshold
+                    exceeds_threshold = max_probs > current_xtc_threshold
 
                     # Generate random numbers for each token position
                     random_probs = torch.rand_like(max_probs)
 
                     # Mask for applying XTC
-                    apply_xtc = exceeds_threshold & (random_probs < xtc_probability)
+                    apply_xtc = exceeds_threshold & (random_probs < current_xtc_probability)
 
                     # We need to set the logit of the top token to -inf where apply_xtc is True
                     # Create a scatter mask
