@@ -1359,3 +1359,60 @@ def test_generate_exponential_schedules_coverage(mocker):
         tkg_schedule="exponential"
     )
     assert outputs is not None
+
+def test_xtc_dynamic_schedules(mocker):
+    config = DiffusionConfig(
+        vocab_size=100,
+        hidden_size=32,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        max_position_embeddings=128,
+        mask_token_id=0,
+        diffusion_steps=10,
+        base_config_dict={"model_type": "llama", "vocab_size": 100, "hidden_size": 32, "num_hidden_layers": 2, "num_attention_heads": 4}
+    )
+    model = DiffusionModelForConditionalGeneration(config)
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    mock_softmax = mocker.patch("torch.nn.functional.softmax", return_value=torch.ones(1, 13, 100) / 100.0)
+
+    # linear
+    model.generate(
+        input_ids,
+        max_new_tokens=10,
+        xtc_threshold=0.8,
+        xtc_threshold_schedule="linear",
+        min_xtc_threshold=0.1,
+        xtc_probability=0.9,
+        xtc_probability_schedule="linear",
+        min_xtc_probability=0.2,
+    )
+    assert mock_softmax.call_count > 0
+
+    mock_softmax.reset_mock()
+    # cosine
+    model.generate(
+        input_ids,
+        max_new_tokens=10,
+        xtc_threshold=0.8,
+        xtc_threshold_schedule="cosine",
+        min_xtc_threshold=0.1,
+        xtc_probability=0.9,
+        xtc_probability_schedule="cosine",
+        min_xtc_probability=0.2,
+    )
+    assert mock_softmax.call_count > 0
+
+    mock_softmax.reset_mock()
+    # exponential
+    model.generate(
+        input_ids,
+        max_new_tokens=10,
+        xtc_threshold=0.8,
+        xtc_threshold_schedule="exponential",
+        min_xtc_threshold=0.1,
+        xtc_probability=0.9,
+        xtc_probability_schedule="exponential",
+        min_xtc_probability=0.2,
+    )
+    assert mock_softmax.call_count > 0
