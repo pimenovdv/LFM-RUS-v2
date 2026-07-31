@@ -1416,3 +1416,42 @@ def test_xtc_dynamic_schedules(mocker):
         min_xtc_probability=0.2,
     )
     assert mock_softmax.call_count > 0
+
+def test_penalty_range(mocker):
+    config = DiffusionConfig(
+        vocab_size=100,
+        hidden_size=32,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        max_position_embeddings=128,
+        mask_token_id=0,
+        diffusion_steps=10,
+        base_config_dict={"model_type": "llama", "vocab_size": 100, "hidden_size": 32, "num_hidden_layers": 2, "num_attention_heads": 4}
+    )
+    model = DiffusionModelForConditionalGeneration(config)
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    # Generate with repetition penalty and a small penalty range
+    # It should only apply the penalty to the last 'penalty_range' tokens
+    res1 = model.generate(input_ids, max_new_tokens=4, repetition_penalty=2.0)
+    res2 = model.generate(input_ids, max_new_tokens=4, repetition_penalty=2.0, penalty_range=2)
+
+    assert res1.shape == (1, 7)
+    assert res2.shape == (1, 7)
+
+def test_logit_smoothing(mocker):
+    config = DiffusionConfig(
+        vocab_size=100,
+        hidden_size=32,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        max_position_embeddings=128,
+        mask_token_id=0,
+        diffusion_steps=10,
+        base_config_dict={"model_type": "llama", "vocab_size": 100, "hidden_size": 32, "num_hidden_layers": 2, "num_attention_heads": 4}
+    )
+    model = DiffusionModelForConditionalGeneration(config)
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    res = model.generate(input_ids, max_new_tokens=2, logit_smoothing=0.5)
+    assert res.shape == (1, 5)

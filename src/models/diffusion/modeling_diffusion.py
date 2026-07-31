@@ -221,6 +221,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         presence_penalty: float = 0.0,
         presence_penalty_schedule: str = "constant",
         min_presence_penalty: float = 0.0,
+        penalty_range: Optional[int] = None,
+        logit_smoothing: float = 0.0,
         xtc_threshold: float = 0.0,
         xtc_threshold_schedule: str = "constant",
         min_xtc_threshold: float = 0.0,
@@ -499,6 +501,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         # Get tokens in the context (ignoring mask tokens)
                         context_tokens = x[b, :block_end]
                         valid_context = context_tokens[context_tokens != mask_id]
+                        if penalty_range is not None and penalty_range > 0:
+                            valid_context = valid_context[-penalty_range:]
 
                         if valid_context.numel() > 0:
                             unique_tokens, counts = torch.unique(valid_context, return_counts=True)
@@ -776,6 +780,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_temperature = torch.clamp(current_temperature, min=min_temperature)
                     else:
                         current_temperature = max(current_temperature, min_temperature)
+
+                if logit_smoothing > 0.0:
+                    logits = logits * (1 - logit_smoothing) + logits.mean(dim=-1, keepdim=True) * logit_smoothing
 
                 if renormalize_logits:
                     logits = logits - logits.logsumexp(dim=-1, keepdim=True)
