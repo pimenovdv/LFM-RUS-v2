@@ -9,16 +9,30 @@ import math
 
 from .configuration_diffusion import DiffusionConfig
 
-def get_num_transfer_tokens(mask_index, steps):
+def get_num_transfer_tokens(mask_index, steps, schedule="linear"):
     """
     Compute the number of tokens to unmask at each step for each sequence in the batch.
     """
-    mask_num = mask_index.sum(dim=1, keepdim=True)
-    base = mask_num // steps
-    remainder = mask_num % steps
-    transfer_tokens = torch.zeros(mask_num.shape[0], steps, dtype=torch.long, device=mask_index.device)
+    mask_num = mask_index.sum(dim=1)  # Shape: (batch_size,)
+
+    fractions = torch.zeros(steps, dtype=torch.float32, device=mask_index.device)
     for i in range(steps):
-        transfer_tokens[:, i] = base.squeeze() + (remainder.squeeze() > i).long()
+        x = (i + 1) / steps
+        if schedule == "cosine":
+            frac = math.sin(x * math.pi / 2)
+        elif schedule == "square":
+            frac = x ** 2
+        elif schedule == "exponential":
+            frac = (math.exp(3 * x) - 1) / (math.exp(3) - 1)
+        else: # linear or fallback
+            frac = x
+        fractions[i] = frac
+
+    target_unmasked = torch.round(mask_num.unsqueeze(1).float() * fractions.unsqueeze(0)).long()
+
+    prev_unmasked = torch.cat([torch.zeros_like(mask_num.unsqueeze(1)), target_unmasked[:, :-1]], dim=1)
+
+    transfer_tokens = target_unmasked - prev_unmasked
     return transfer_tokens
 
 def filter_special_tokens(tokens, tokenizer, mask_id):
@@ -250,6 +264,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         forced_decoder_ids: Optional[list[list[int]]] = None,
         forced_eos_token_id: Optional[int] = None,
         renormalize_logits: bool = False,
+        unmasking_schedule: str = "linear",
         **kwargs
     ):
         """
@@ -299,7 +314,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
             block_end = T + (num_block + 1) * block_length
 
             block_mask_index = (x[:, block_start:block_end] == mask_id)
-            num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block)
+            num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block, schedule=unmasking_schedule)
 
             for i in range(steps_per_block):
                 if max_time is not None and time.time() - start_time > max_time:
