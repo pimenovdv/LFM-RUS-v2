@@ -1455,3 +1455,69 @@ def test_logit_smoothing(mocker):
 
     res = model.generate(input_ids, max_new_tokens=2, logit_smoothing=0.5)
     assert res.shape == (1, 5)
+
+def test_get_num_transfer_tokens_schedules(mocker):
+    from src.models.diffusion.modeling_diffusion import get_num_transfer_tokens
+    import torch
+
+    mask_index = torch.ones(2, 10, dtype=torch.bool)
+    mask_index[1, 5:] = False  # first sequence has 10 masks, second has 5
+
+    linear_tokens = get_num_transfer_tokens(mask_index, 4, schedule="linear")
+    assert linear_tokens.sum(dim=1).tolist() == [10, 5]
+
+    cosine_tokens = get_num_transfer_tokens(mask_index, 4, schedule="cosine")
+    assert cosine_tokens.sum(dim=1).tolist() == [10, 5]
+
+    square_tokens = get_num_transfer_tokens(mask_index, 4, schedule="square")
+    assert square_tokens.sum(dim=1).tolist() == [10, 5]
+
+    exponential_tokens = get_num_transfer_tokens(mask_index, 4, schedule="exponential")
+    assert exponential_tokens.sum(dim=1).tolist() == [10, 5]
+
+    # check differences in distribution
+    assert not torch.allclose(linear_tokens, cosine_tokens)
+    assert not torch.allclose(linear_tokens, square_tokens)
+
+def test_generate_unmasking_schedules(mocker):
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    import torch
+
+    config = DiffusionConfig(
+        vocab_size=100,
+        hidden_size=32,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        max_position_embeddings=128,
+        mask_token_id=0,
+        diffusion_steps=4,
+        base_config_dict={"model_type": "llama", "vocab_size": 100, "hidden_size": 32, "num_hidden_layers": 2, "num_attention_heads": 4}
+    )
+    model = DiffusionModelForConditionalGeneration(config)
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 100)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    # linear
+    res1 = model.generate(input_ids, max_new_tokens=4, unmasking_schedule="linear")
+    assert res1.shape == (1, 7)
+
+    # cosine
+    res2 = model.generate(input_ids, max_new_tokens=4, unmasking_schedule="cosine")
+    assert res2.shape == (1, 7)
+
+    # square
+    res3 = model.generate(input_ids, max_new_tokens=4, unmasking_schedule="square")
+    assert res3.shape == (1, 7)
+
+    # exponential
+    res4 = model.generate(input_ids, max_new_tokens=4, unmasking_schedule="exponential")
+    assert res4.shape == (1, 7)
