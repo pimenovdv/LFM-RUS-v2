@@ -256,6 +256,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         remasking: Optional[str] = None,
         attention_mask: Optional[torch.Tensor] = None,
         unconditional_input_ids: Optional[torch.Tensor] = None,
+        negative_prompt_ids: Optional[torch.Tensor] = None,
         steering_vector: Optional[torch.Tensor] = None,
         steering_layer_name: Optional[str] = None,
         steering_scale: float = 1.0,
@@ -271,6 +272,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         Iterative unmasking generation for Diffusion Models.
         """
         start_time = time.time() if max_time is not None else None
+
+        if negative_prompt_ids is not None:
+            unconditional_input_ids = negative_prompt_ids
 
         steps = steps or self.config.diffusion_steps
         block_length = block_length or self.config.block_size
