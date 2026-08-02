@@ -1521,3 +1521,55 @@ def test_generate_unmasking_schedules(mocker):
     # exponential
     res4 = model.generate(input_ids, max_new_tokens=4, unmasking_schedule="exponential")
     assert res4.shape == (1, 7)
+
+def test_generate_negative_prompt_ids(mocker):
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    import torch
+
+    config = DiffusionConfig(
+        vocab_size=100,
+        hidden_size=32,
+        num_hidden_layers=2,
+        num_attention_heads=4,
+        max_position_embeddings=128,
+        mask_token_id=0,
+        diffusion_steps=2,
+        base_config_dict={"model_type": "llama", "vocab_size": 100, "hidden_size": 32, "num_hidden_layers": 2, "num_attention_heads": 4}
+    )
+    model = DiffusionModelForConditionalGeneration(config)
+    input_ids = torch.tensor([[1, 2, 3]])
+    negative_prompt_ids = torch.tensor([[4, 5]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 100)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    res = model.generate(
+        input_ids,
+        max_new_tokens=2,
+        cfg_scale=2.0,
+        negative_prompt_ids=negative_prompt_ids
+    )
+
+    assert res.shape == (1, 5)
+    # The first pass is conditional, second is unconditional with CFG
+    # It takes 2 steps for diffusion, so it should be called 4 times in total
+    assert mock_forward.call_count == 4
+
+    # Check that unconditional input was actually passed correctly in the unconditional call
+    found_uncond = False
+    for call in mock_forward.call_args_list:
+        kwargs = call.kwargs
+        called_input_ids = kwargs["input_ids"]
+        # The unconditional part of the tensor should start with [4, 5]
+        if torch.equal(called_input_ids[0, :2], negative_prompt_ids[0]):
+            found_uncond = True
+            break
+
+    assert found_uncond, "Negative prompt ids were not passed to unconditional forward call"
