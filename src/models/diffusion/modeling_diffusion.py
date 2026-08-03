@@ -266,6 +266,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         forced_eos_token_id: Optional[int] = None,
         renormalize_logits: bool = False,
         unmasking_schedule: str = "linear",
+        num_return_sequences: int = 1,
         **kwargs
     ):
         """
@@ -275,6 +276,17 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         if negative_prompt_ids is not None:
             unconditional_input_ids = negative_prompt_ids
+
+        if num_return_sequences > 1:
+            input_ids = input_ids.repeat_interleave(num_return_sequences, dim=0)
+            if attention_mask is not None:
+                attention_mask = attention_mask.repeat_interleave(num_return_sequences, dim=0)
+            if unconditional_input_ids is not None:
+                unconditional_input_ids = unconditional_input_ids.repeat_interleave(num_return_sequences, dim=0)
+            # negative_prompt_ids is already assigned to unconditional_input_ids if present.
+            # but we also update it just in case it's used elsewhere
+            if negative_prompt_ids is not None:
+                negative_prompt_ids = negative_prompt_ids.repeat_interleave(num_return_sequences, dim=0)
 
         steps = steps or self.config.diffusion_steps
         block_length = block_length or self.config.block_size
