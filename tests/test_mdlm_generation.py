@@ -628,3 +628,21 @@ def test_dynamic_eta_cutoff_schedule(dummy_model):
     assert out_linear.shape == (1, 5)
     assert out_cosine.shape == (1, 5)
     assert out_exp.shape == (1, 5)
+
+def test_num_return_sequences_support(dummy_model, mocker):
+    """
+    Test that generate supports returning multiple sequences per prompt
+    using num_return_sequences.
+    """
+    input_ids = torch.tensor([[1, 2], [3, 4]])
+
+    # Each prompt should return 3 sequences, total 6
+    output = dummy_model.generate(
+        input_ids=input_ids,
+        max_new_tokens=4,
+        steps=2,
+        num_return_sequences=3
+    )
+
+    assert output.size(0) == 6
+    assert output.size(1) == input_ids.size(1) + 4
