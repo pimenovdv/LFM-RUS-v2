@@ -2,7 +2,7 @@
 
 Этот документ содержит пошаговый план разработки для интеграции маскированной дискретной диффузии в существующий пайплайн обучения.
 
-## [x] Завершенные этапы (Шаги 1-34)
+## [x] Завершенные этапы (Шаги 1-35)
 **Сжатое описание:**
 Реализована базовая интеграция MDLM с обширным набором методов сэмплинга и параметров генерации:
 - Поддержка CFG, Guidance Rescale, Activation Steering, и Negative Prompting (`negative_prompt_ids`).
@@ -12,8 +12,11 @@
 - Реализовано окно применения штрафов и сглаживание логитов.
 - Внедрены динамические расписания размаскирования (linear, cosine, square, exponential).
 
-## [x] Шаг 35: Поддержка `num_return_sequences` при генерации
-**Цель:** Добавить поддержку возврата нескольких последовательностей на один входной промпт (параметр `num_return_sequences`), что необходимо для пайплайнов RLHF, таких как Best-of-N и Rejection Sampling.
+- Поддержка `num_return_sequences` при генерации для генерации нескольких последовательностей на один промпт (полезно для Best-of-N).
+
+## [x] Шаг 36: Поддержка `return_dict_in_generate` и `output_scores`
+**Цель:** Добавить поддержку возврата результатов генерации в виде словаря с логитами (scores), что необходимо для пайплайнов RLHF (Reward Modeling, PPO) для вычисления логпробов и других метрик.
 * **Детали реализации:**
-  * Добавить параметр `num_return_sequences: int = 1` в метод `generate` в файле `src/models/diffusion/modeling_diffusion.py`.
-  * Реализовать логику: если `num_return_sequences > 1`, применить `repeat_interleave` для дублирования входных тензоров (`input_ids`, `attention_mask`, `unconditional_input_ids`, `negative_prompt_ids`) в размерности батча перед началом цикла генерации.
+  * Добавить параметры `return_dict_in_generate: bool = False` и `output_scores: bool = False` в метод `generate` в `src/models/diffusion/modeling_diffusion.py`.
+  * Если `output_scores=True`, сохранять логиты (logits_full) на каждом шаге итерации.
+  * Если `return_dict_in_generate=True`, возвращать словарь `{"sequences": input_ids, "scores": tuple(scores)}` вместо тензора.
