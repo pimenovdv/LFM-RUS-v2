@@ -1573,3 +1573,60 @@ def test_generate_negative_prompt_ids(mocker):
             break
 
     assert found_uncond, "Negative prompt ids were not passed to unconditional forward call"
+
+def test_return_dict_in_generate_and_scores(mocker):
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    import torch
+
+    config = DiffusionConfig(vocab_size=10, mask_token_id=0, max_timesteps=10, diffusion_steps=2, block_size=2, base_config_dict={"model_type": "gpt2"})
+    # mock config.diffusion_steps, max_timesteps inside model if needed
+    model = DiffusionModelForConditionalGeneration(config)
+
+    # Mock the forward pass to return some dummy logits
+    class MockOutput:
+        def __init__(self, logits):
+            self.logits = logits
+
+    def mock_forward(*args, **kwargs):
+        # input_ids: [batch, T+max_new_tokens]
+        # output logits: [batch, T+max_new_tokens, vocab_size]
+        input_ids = kwargs.get("input_ids")
+        batch, seq_len = input_ids.shape
+        logits = torch.randn(batch, seq_len, config.vocab_size)
+        return MockOutput(logits)
+
+    mocker.patch.object(model, "forward", side_effect=mock_forward)
+
+    input_ids = torch.tensor([[1, 2]])
+    # generate with return_dict_in_generate=False (default)
+    output_tensor = model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2
+    )
+    assert isinstance(output_tensor, torch.Tensor)
+
+    # generate with return_dict_in_generate=True, output_scores=True
+    output_dict = model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        return_dict_in_generate=True,
+        output_scores=True,
+        remasking='random' # force one branch for coverage
+    )
+
+    assert isinstance(output_dict, dict)
+    assert "sequences" in output_dict
+    assert "scores" in output_dict
+
+    # We requested max_new_tokens=2, block_size=2 => 1 block
+    # steps=2 => 2 iterations in the inner loop
+    # So scores should be a tuple of length 2
+    assert isinstance(output_dict["scores"], tuple)
+    assert len(output_dict["scores"]) == 2
+
+    # Check shape of each score tensor: (batch_size, seq_len, vocab_size)
+    for score in output_dict["scores"]:
+        assert score.shape == (1, 4, config.vocab_size)  # T(2) + max_new_tokens(2) = 4
