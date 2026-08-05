@@ -1630,3 +1630,84 @@ def test_return_dict_in_generate_and_scores(mocker):
     # Check shape of each score tensor: (batch_size, seq_len, vocab_size)
     for score in output_dict["scores"]:
         assert score.shape == (1, 4, config.vocab_size)  # T(2) + max_new_tokens(2) = 4
+
+def test_generate_logits_processor(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    from transformers import LogitsProcessorList
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+    mock_processor = mocker.MagicMock()
+    # Processor needs to return logits tensor
+    mock_processor.return_value = torch.randn(1, 3, 10)
+
+    # We pass it as LogitsProcessorList
+    logits_processor = LogitsProcessorList([mock_processor])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        # output shape must match input sequence length
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=3,
+        logits_processor=logits_processor
+    )
+
+    # Check that it was called
+    assert mock_processor.called
+
+def test_generate_stopping_criteria(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    from transformers import StoppingCriteriaList
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=5, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+    mock_criteria = mocker.MagicMock()
+    # It stops early
+    mock_criteria.return_value = True
+    stopping_criteria = StoppingCriteriaList([mock_criteria])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    model.generate(
+        input_ids=input_ids,
+        max_new_tokens=1,
+        steps=5,
+        stopping_criteria=stopping_criteria
+    )
+
+    # Verify it was called
+    assert mock_criteria.called

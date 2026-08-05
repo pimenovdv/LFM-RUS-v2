@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from transformers import PreTrainedModel, AutoConfig, AutoModel
+from transformers import PreTrainedModel, AutoConfig, AutoModel, LogitsProcessorList, StoppingCriteriaList
 import torch.nn.functional as F
 from typing import Optional
 import numpy as np
@@ -269,6 +269,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         num_return_sequences: int = 1,
         return_dict_in_generate: bool = False,
         output_scores: bool = False,
+        logits_processor: Optional[LogitsProcessorList] = None,
+        stopping_criteria: Optional[StoppingCriteriaList] = None,
         **kwargs
     ):
         """
@@ -794,6 +796,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                if logits_processor is not None:
+                    logits = logits_processor(x, logits)
+
                 current_temperature = temperature
                 if temperature > 0 or dynamic_temperature_entropy > 0:
                     if temperature_schedule == "linear":
@@ -863,6 +868,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         transfer_index[j, select_index] = True
 
                 x[transfer_index] = x0[transfer_index].to(x.dtype)
+
+            if stopping_criteria is not None and stopping_criteria(x, logits):
+                break
 
             # Check for early stopping via eos_token_id
             if eos_token_id is not None:
