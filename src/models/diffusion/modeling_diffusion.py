@@ -253,6 +253,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         remove_invalid_values: bool = False,
         logit_bias: Optional[dict[int, float]] = None,
         suppress_tokens: Optional[list[int]] = None,
+        begin_suppress_tokens: Optional[list[int]] = None,
         remasking: Optional[str] = None,
         attention_mask: Optional[torch.Tensor] = None,
         unconditional_input_ids: Optional[torch.Tensor] = None,
@@ -453,6 +454,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                 if suppress_tokens is not None:
                     logits[:, :, suppress_tokens] = -float("Inf")
+
+                if begin_suppress_tokens is not None and block_start == T:
+                    logits[:, 0, begin_suppress_tokens] = -float("Inf")
 
                 if logit_bias is not None:
                     for token_id, bias in logit_bias.items():

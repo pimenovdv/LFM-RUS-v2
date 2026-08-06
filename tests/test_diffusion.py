@@ -1711,3 +1711,65 @@ def test_generate_stopping_criteria(mocker):
 
     # Verify it was called
     assert mock_criteria.called
+
+def test_generate_begin_suppress_tokens(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    import torch
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=2, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+    begin_suppress_tokens = [3, 4]
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.randn(1, seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    # We can use a stopping criteria to intercept logits!
+    captured_logits = []
+
+    class MockStoppingCriteria:
+        def __call__(self, input_ids, logits, **kwargs):
+            captured_logits.append(logits.clone())
+            return False
+
+    mock_criteria = MockStoppingCriteria()
+
+    mocker.patch("src.models.diffusion.modeling_diffusion.StoppingCriteriaList", side_effect=lambda x: x[0])
+
+    model.generate(
+        input_ids=input_ids,
+        max_new_tokens=4,
+        steps=2,
+        begin_suppress_tokens=begin_suppress_tokens,
+        stopping_criteria=mock_criteria
+    )
+
+    first_step_logits = captured_logits[0]
+
+    # Check that begin_suppress_tokens were set to -inf
+    assert first_step_logits[0, 0, 3].item() == -float("Inf")
+    assert first_step_logits[0, 0, 4].item() == -float("Inf")
+
+    assert first_step_logits[0, 1, 3].item() != -float("Inf")
+    assert first_step_logits[0, 1, 4].item() != -float("Inf")
+
+    # Check that in the second block (captured_logits[1] or captured_logits[2]), it is not -inf
+    # Depending on how often stopping criteria is called. It is called once per step per block?
+    # Actually, it's called after confidence generation.
+    second_block_logits = captured_logits[-1] # the very last step
+    assert second_block_logits[0, 0, 3].item() != -float("Inf")
+    assert second_block_logits[0, 0, 4].item() != -float("Inf")
