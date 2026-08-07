@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import PreTrainedModel, AutoConfig, AutoModel, LogitsProcessorList, StoppingCriteriaList
 import torch.nn.functional as F
-from typing import Optional
+from typing import Optional, Union
 import numpy as np
 import time
 import math
@@ -261,10 +261,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         steering_vector: Optional[torch.Tensor] = None,
         steering_layer_name: Optional[str] = None,
         steering_scale: float = 1.0,
-        eos_token_id: Optional[int] = None,
+        eos_token_id: Optional[Union[int, list[int]]] = None,
         pad_token_id: Optional[int] = None,
         forced_decoder_ids: Optional[list[list[int]]] = None,
-        forced_eos_token_id: Optional[int] = None,
+        forced_eos_token_id: Optional[Union[int, list[int]]] = None,
         renormalize_logits: bool = False,
         unmasking_schedule: str = "linear",
         num_return_sequences: int = 1,
@@ -325,7 +325,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         x[:, T + idx] = token
 
         if forced_eos_token_id is not None:
-            x[:, T + max_new_tokens - 1] = forced_eos_token_id
+            if isinstance(forced_eos_token_id, list):
+                x[:, T + max_new_tokens - 1] = forced_eos_token_id[0]
+            else:
+                x[:, T + max_new_tokens - 1] = forced_eos_token_id
 
         scores = [] if return_dict_in_generate and output_scores else None
 
@@ -564,7 +567,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     # min_new_tokens requirement means block_start + (generated inside block)
                     # For simplicity in block generation, we just disable eos_token if we haven't reached min_new_tokens.
                     if block_end - T <= min_new_tokens:
-                        logits[:, :, eos_token_id] = -float("Inf")
+                        if isinstance(eos_token_id, list):
+                            for eos_id in eos_token_id:
+                                logits[:, :, eos_id] = -float("Inf")
+                        else:
+                            logits[:, :, eos_token_id] = -float("Inf")
 
                 current_xtc_threshold = xtc_threshold
                 if xtc_threshold > 0.0:
@@ -879,11 +886,16 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
             # Check for early stopping via eos_token_id
             if eos_token_id is not None:
                 # Find sequences that generated eos_token_id in the current block
-                eos_in_block = (x[:, block_start:block_end] == eos_token_id)
+                if isinstance(eos_token_id, list):
+                    eos_in_block = torch.stack([(x[:, block_start:block_end] == eos_id) for eos_id in eos_token_id]).any(dim=0)
+                    finished_mask = torch.stack([(x[:, T:block_end] == eos_id) for eos_id in eos_token_id]).any(dim=0).any(dim=1)
+                else:
+                    eos_in_block = (x[:, block_start:block_end] == eos_token_id)
+                    finished_mask = (x[:, T:block_end] == eos_token_id).any(dim=1)
+
                 if eos_in_block.any():
                     # If all sequences in the batch have an eos_token_id in or before this block, stop
                     # A sequence is finished if it has an eos_token anywhere after T
-                    finished_mask = (x[:, T:block_end] == eos_token_id).any(dim=1)
                     if finished_mask.all():
                         # Truncate x up to block_end
                         x = x[:, :block_end]
@@ -893,7 +905,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         if eos_token_id is not None and pad_token_id is not None:
             for b in range(batch_size):
                 # Find first eos_token_id after the prompt
-                eos_indices = (x[b, T:] == eos_token_id).nonzero(as_tuple=True)[0]
+                if isinstance(eos_token_id, list):
+                    eos_indices = torch.stack([(x[b, T:] == eos_id) for eos_id in eos_token_id]).any(dim=0).nonzero(as_tuple=True)[0]
+                else:
+                    eos_indices = (x[b, T:] == eos_token_id).nonzero(as_tuple=True)[0]
+
                 if len(eos_indices) > 0:
                     first_eos = eos_indices[0].item() + T
                     # Pad the rest of the sequence

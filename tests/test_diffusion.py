@@ -427,6 +427,33 @@ def test_min_new_tokens(mocker):
 
     assert not (res_min_new == 5).any()
 
+def test_min_new_tokens_list(mocker):
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=2, diffusion_steps=2)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.ones((1, 2), dtype=torch.long)
+
+    mock_forward = mocker.patch.object(DiffusionModelForConditionalGeneration, 'forward')
+    logits = torch.randn(1, 6, 10)
+    logits[:, :, 5] = 100.0
+    logits[:, :, 6] = 100.0
+    mock_output = mocker.MagicMock()
+    mock_output.logits = logits
+    mock_forward.return_value = mock_output
+
+    # Test with min_new_tokens with a list of eos_token_id
+    res_min_new = model.generate(input_ids, max_new_tokens=4, min_new_tokens=4, eos_token_id=[5, 6])
+
+    assert not (res_min_new == 5).any()
+    assert not (res_min_new == 6).any()
+
 def test_xtc_sampling(mocker):
     mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
     mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
@@ -764,6 +791,40 @@ def test_forced_eos_token_id(mocker):
 
     # Output should end with eos token 8
     assert outputs[0, -1].item() == 8
+
+def test_forced_eos_token_id_list(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=1, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        out_logits = torch.zeros(1, seq_len, 10)
+        out_logits[0, -2, 5] = 10.0
+        mock_out = mocker.MagicMock()
+        mock_out.logits = out_logits
+        return mock_out
+
+    mock_forward.side_effect = forward_side_effect
+
+    outputs = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=2,
+        steps=1,
+        forced_eos_token_id=[7, 8]
+    )
+
+    assert outputs[0, 3].item() == 7
+
 
 def test_renormalize_logits(mocker):
     mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
