@@ -226,6 +226,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         tfs_z_schedule: str = "constant",
         min_tfs_z: float = 1.0,
         dynamic_temperature_entropy: float = 0.0,
+        encoder_repetition_penalty: float = 1.0,
         repetition_penalty: float = 1.0,
         repetition_penalty_schedule: str = "constant",
         min_repetition_penalty: float = 1.0,
@@ -247,6 +248,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         tkg_schedule: str = "constant",
         tkg_min_scale: float = 0.0,
         min_new_tokens: Optional[int] = None,
+        encoder_no_repeat_ngram_size: int = 0,
         no_repeat_ngram_size: int = 0,
         bad_words_ids: Optional[list[list[int]]] = None,
         max_time: Optional[float] = None,
@@ -493,6 +495,31 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                     for bt in banned_tokens:
                                         logits[b, pos, bt] = -float("Inf")
 
+                if encoder_no_repeat_ngram_size > 0:
+                    for b in range(batch_size):
+                        seq = x[b, :block_end]
+                        prompt_seq = x[b, :T]
+                        for pos in range(block_start, block_end):
+                            if pos < encoder_no_repeat_ngram_size - 1:
+                                continue
+
+                            prev_tokens = seq[pos - (encoder_no_repeat_ngram_size - 1):pos]
+                            if mask_id not in prev_tokens:
+                                prefix_list = prev_tokens.tolist()
+                                banned_tokens = set()
+
+                                # Search only within the prompt
+                                for start_idx in range(T - encoder_no_repeat_ngram_size + 1):
+                                    window = prompt_seq[start_idx:start_idx + encoder_no_repeat_ngram_size - 1].tolist()
+                                    if window == prefix_list:
+                                        next_token = prompt_seq[start_idx + encoder_no_repeat_ngram_size - 1].item()
+                                        if next_token != mask_id:
+                                            banned_tokens.add(next_token)
+
+                                if banned_tokens:
+                                    for bt in banned_tokens:
+                                        logits[b, pos, bt] = -float("Inf")
+
                 if bad_words_ids is not None:
                     for b in range(batch_size):
                         for pos in range(block_start, block_end):
@@ -539,7 +566,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_presence_penalty = presence_penalty * math.exp(-3.0 * step_ratio)
                 current_presence_penalty = max(current_presence_penalty, min_presence_penalty)
 
-                if current_repetition_penalty != 1.0 or current_frequency_penalty != 0.0 or current_presence_penalty != 0.0:
+                if current_repetition_penalty != 1.0 or current_frequency_penalty != 0.0 or current_presence_penalty != 0.0 or encoder_repetition_penalty != 1.0:
                     # Apply penalties to already generated/unmasked tokens
                     for b in range(batch_size):
                         # Get tokens in the context (ignoring mask tokens)
@@ -561,6 +588,15 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                 # frequency_penalty applies proportionally to the count
                                 penalty = (current_presence_penalty + counts.float() * current_frequency_penalty).unsqueeze(0)
                                 logits[b, :, unique_tokens] -= penalty.to(logits.device)
+
+                        if encoder_repetition_penalty != 1.0:
+                            prompt_tokens = x[b, :T]
+                            valid_prompt_tokens = prompt_tokens[prompt_tokens != mask_id]
+                            if valid_prompt_tokens.numel() > 0:
+                                unique_prompt_tokens = torch.unique(valid_prompt_tokens)
+                                score = logits[b, :, unique_prompt_tokens]
+                                penalized_score = torch.where(score < 0, score * encoder_repetition_penalty, score / encoder_repetition_penalty)
+                                logits[b, :, unique_prompt_tokens] = penalized_score
 
                 if min_new_tokens is not None and min_new_tokens > 0 and eos_token_id is not None:
                     # current generated tokens count is block_start - T
