@@ -190,7 +190,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
     def generate(
         self,
         input_ids: torch.Tensor,
-        max_new_tokens: int = 128,
+        max_new_tokens: Optional[int] = None,
+        max_length: Optional[int] = None,
+        min_length: Optional[int] = None,
+        min_new_tokens: Optional[int] = None,
         steps: Optional[int] = None,
         block_length: Optional[int] = None,
         temperature: float = 0.0,
@@ -247,7 +250,6 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         tkg_scale: float = 0.0,
         tkg_schedule: str = "constant",
         tkg_min_scale: float = 0.0,
-        min_new_tokens: Optional[int] = None,
         encoder_no_repeat_ngram_size: int = 0,
         no_repeat_ngram_size: int = 0,
         bad_words_ids: Optional[list[list[int]]] = None,
@@ -307,14 +309,27 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         batch_size = input_ids.size(0)
         device, dtype = input_ids.device, input_ids.dtype
 
-        if max_new_tokens % block_length != 0:
+        if max_length is not None and max_new_tokens is None:
+            max_new_tokens = max(0, max_length - T)
+        elif max_length is not None and max_new_tokens is not None:
+            max_new_tokens = min(max_new_tokens, max(0, max_length - T))
+        elif max_new_tokens is None:
+            max_new_tokens = 128
+
+        if min_length is not None:
+            min_new_tokens = max(min_new_tokens or 0, min_length - T)
+
+        if max_new_tokens > 0 and max_new_tokens % block_length != 0:
             block_length = max_new_tokens
 
-        num_blocks = max_new_tokens // block_length
-        if steps % num_blocks != 0:
-            steps_per_block = max(1, steps // num_blocks)
+        num_blocks = max_new_tokens // block_length if max_new_tokens > 0 else 0
+        if num_blocks > 0:
+            if steps % num_blocks != 0:
+                steps_per_block = max(1, steps // num_blocks)
+            else:
+                steps_per_block = steps // num_blocks
         else:
-            steps_per_block = steps // num_blocks
+            steps_per_block = steps
 
         x = torch.full((batch_size, T + max_new_tokens), mask_id, dtype=dtype, device=device)
         x[:, :T] = input_ids
@@ -382,6 +397,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_top_k = int(top_k * 0.5 * (1.0 + math.cos(math.pi * step_ratio)))
                     elif top_k_schedule == "exponential":
                         current_top_k = int(top_k * math.exp(-3.0 * step_ratio))
+                    elif top_k_schedule == "cyclic":
+                        current_top_k = int(top_k * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio)))
                     current_top_k = max(current_top_k, min_top_k)
 
                 if (cfg_scale > 0.0 or tkg_scale > 0.0) and unconditional_input_ids is not None:
@@ -409,6 +426,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                             current_cfg_scale = cfg_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                         elif cfg_schedule == "exponential":
                             current_cfg_scale = cfg_scale * math.exp(-3.0 * step_ratio)
+                        elif cfg_schedule == "cyclic":
+                            current_cfg_scale = cfg_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                         else:
                             current_cfg_scale = cfg_scale
 
@@ -421,6 +440,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                             current_tkg_scale = tkg_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                         elif tkg_schedule == "exponential":
                             current_tkg_scale = tkg_scale * math.exp(-3.0 * step_ratio)
+                        elif tkg_schedule == "cyclic":
+                            current_tkg_scale = tkg_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                         else:
                             current_tkg_scale = tkg_scale
 
@@ -438,6 +459,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                             current_guidance_rescale = guidance_rescale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                         elif guidance_rescale_schedule == "exponential":
                             current_guidance_rescale = guidance_rescale * math.exp(-3.0 * step_ratio)
+                        elif guidance_rescale_schedule == "cyclic":
+                            current_guidance_rescale = guidance_rescale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                         else:
                             current_guidance_rescale = guidance_rescale
 
@@ -544,6 +567,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_repetition_penalty = repetition_penalty * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif repetition_penalty_schedule == "exponential":
                         current_repetition_penalty = repetition_penalty * math.exp(-3.0 * step_ratio)
+                    elif repetition_penalty_schedule == "cyclic":
+                        current_repetition_penalty = repetition_penalty * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                 current_repetition_penalty = max(current_repetition_penalty, min_repetition_penalty)
 
                 current_frequency_penalty = frequency_penalty
@@ -554,6 +579,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_frequency_penalty = frequency_penalty * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif frequency_penalty_schedule == "exponential":
                         current_frequency_penalty = frequency_penalty * math.exp(-3.0 * step_ratio)
+                    elif frequency_penalty_schedule == "cyclic":
+                        current_frequency_penalty = frequency_penalty * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                 current_frequency_penalty = max(current_frequency_penalty, min_frequency_penalty)
 
                 current_presence_penalty = presence_penalty
@@ -564,6 +591,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_presence_penalty = presence_penalty * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif presence_penalty_schedule == "exponential":
                         current_presence_penalty = presence_penalty * math.exp(-3.0 * step_ratio)
+                    elif presence_penalty_schedule == "cyclic":
+                        current_presence_penalty = presence_penalty * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                 current_presence_penalty = max(current_presence_penalty, min_presence_penalty)
 
                 if current_repetition_penalty != 1.0 or current_frequency_penalty != 0.0 or current_presence_penalty != 0.0 or encoder_repetition_penalty != 1.0:
@@ -617,6 +646,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_xtc_threshold = xtc_threshold * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif xtc_threshold_schedule == "exponential":
                         current_xtc_threshold = xtc_threshold * math.exp(-3.0 * step_ratio)
+                    elif xtc_threshold_schedule == "cyclic":
+                        current_xtc_threshold = xtc_threshold * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                     current_xtc_threshold = max(current_xtc_threshold, min_xtc_threshold)
 
                 current_xtc_probability = xtc_probability
@@ -627,6 +658,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_xtc_probability = xtc_probability * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif xtc_probability_schedule == "exponential":
                         current_xtc_probability = xtc_probability * math.exp(-3.0 * step_ratio)
+                    elif xtc_probability_schedule == "cyclic":
+                        current_xtc_probability = xtc_probability * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                     current_xtc_probability = max(current_xtc_probability, min_xtc_probability)
 
                 if current_xtc_probability > 0.0 and current_xtc_threshold > 0.0:
@@ -662,11 +695,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if top_p_schedule == "linear":
                         current_top_p = top_p * (1.0 - step_ratio)
                     elif top_p_schedule == "cosine":
-
                         current_top_p = top_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif top_p_schedule == "exponential":
-
                         current_top_p = top_p * math.exp(-3.0 * step_ratio)
+                    elif top_p_schedule == "cyclic":
+                        current_top_p = top_p * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
 
                     current_top_p = max(current_top_p, min_top_p)
 
@@ -688,11 +721,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if min_p_schedule == "linear":
                         current_min_p = min_p * (1.0 - step_ratio)
                     elif min_p_schedule == "cosine":
-
                         current_min_p = min_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif min_p_schedule == "exponential":
-
                         current_min_p = min_p * math.exp(-3.0 * step_ratio)
+                    elif min_p_schedule == "cyclic":
+                        current_min_p = min_p * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
 
                     current_min_p = max(current_min_p, min_min_p)
 
@@ -707,11 +740,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if top_a_schedule == "linear":
                         current_top_a = top_a * (1.0 - step_ratio)
                     elif top_a_schedule == "cosine":
-
                         current_top_a = top_a * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif top_a_schedule == "exponential":
-
                         current_top_a = top_a * math.exp(-3.0 * step_ratio)
+                    elif top_a_schedule == "cyclic":
+                        current_top_a = top_a * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
 
                     current_top_a = max(current_top_a, min_top_a)
 
@@ -730,6 +763,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_epsilon = epsilon_cutoff * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif epsilon_cutoff_schedule == "exponential":
                         current_epsilon = epsilon_cutoff * math.exp(-3.0 * step_ratio)
+                    elif epsilon_cutoff_schedule == "cyclic":
+                        current_epsilon = epsilon_cutoff * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
 
                     current_epsilon = max(current_epsilon, min_epsilon_cutoff)
 
@@ -746,6 +781,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_eta = eta_cutoff * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif eta_cutoff_schedule == "exponential":
                         current_eta = eta_cutoff * math.exp(-3.0 * step_ratio)
+                    elif eta_cutoff_schedule == "cyclic":
+                        current_eta = eta_cutoff * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
 
                     current_eta = max(current_eta, min_eta_cutoff)
 
@@ -766,13 +803,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if tfs_z_schedule == "linear":
                         current_tfs_z = tfs_z + (min_tfs_z - tfs_z) * step_ratio
                     elif tfs_z_schedule == "cosine":
-
                         current_tfs_z = min_tfs_z + (tfs_z - min_tfs_z) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif tfs_z_schedule == "exponential":
-
                         # for tfs_z which usually goes towards 1.0 (less cutoff)
                         # or from 1.0 to tfs_z, we use a simple exp interpolation
                         current_tfs_z = min_tfs_z + (tfs_z - min_tfs_z) * math.exp(-3.0 * step_ratio)
+                    elif tfs_z_schedule == "cyclic":
+                        current_tfs_z = min_tfs_z + (tfs_z - min_tfs_z) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
 
                     # Limit the value between min and max of (tfs_z, min_tfs_z)
                     current_tfs_z = max(min(current_tfs_z, max(tfs_z, min_tfs_z)), min(tfs_z, min_tfs_z))
@@ -819,11 +856,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if typical_p_schedule == "linear":
                         current_typical_p = typical_p * (1.0 - step_ratio)
                     elif typical_p_schedule == "cosine":
-
                         current_typical_p = typical_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif typical_p_schedule == "exponential":
-
                         current_typical_p = typical_p * math.exp(-3.0 * step_ratio)
+                    elif typical_p_schedule == "cyclic":
+                        current_typical_p = typical_p * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
 
                     current_typical_p = max(current_typical_p, min_typical_p)
 
@@ -851,11 +888,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     if temperature_schedule == "linear":
                         current_temperature = temperature * (1.0 - step_ratio)
                     elif temperature_schedule == "cosine":
-
                         current_temperature = temperature * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
                     elif temperature_schedule == "exponential":
-
                         current_temperature = temperature * math.exp(-3.0 * step_ratio)
+                    elif temperature_schedule == "cyclic":
+                        current_temperature = temperature * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
 
                     if dynamic_temperature_entropy > 0.0:
                         probs = F.softmax(logits, dim=-1)

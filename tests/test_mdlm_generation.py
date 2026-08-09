@@ -685,3 +685,78 @@ def test_encoder_no_repeat_ngram_size(dummy_model):
         encoder_no_repeat_ngram_size=2
     )
     assert out.shape == (1, 8)
+
+def test_max_length_min_length(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    # Test max_length truncating default or specified max_new_tokens
+    # If max_length = 6, then max_new_tokens should become 2
+    out_max = dummy_model.generate(
+        input_ids,
+        max_length=6,
+        steps=2
+    )
+    assert out_max.shape == (batch_size, 6)
+
+    # Test min_length expanding missing or smaller min_new_tokens
+    # If min_length = 8, min_new_tokens is at least 4
+    # With max_length=10, max_new_tokens=6.
+    out_min = dummy_model.generate(
+        input_ids,
+        min_length=8,
+        max_length=10,
+        steps=2
+    )
+    assert out_min.shape == (batch_size, 10)
+
+def test_cyclic_schedules_coverage(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+    uncond_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    # Test all parameters with cyclic schedule
+    out_cyclic = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        cfg_scale=2.0,
+        cfg_schedule="cyclic",
+        guidance_rescale=0.7,
+        guidance_rescale_schedule="cyclic",
+        unconditional_input_ids=uncond_ids,
+        top_k=50,
+        top_k_schedule="cyclic",
+        top_p=0.9,
+        top_p_schedule="cyclic",
+        min_p=0.1,
+        min_p_schedule="cyclic",
+        top_a=0.9,
+        top_a_schedule="cyclic",
+        typical_p=0.9,
+        typical_p_schedule="cyclic",
+        tfs_z=0.9,
+        tfs_z_schedule="cyclic",
+        epsilon_cutoff=0.1,
+        epsilon_cutoff_schedule="cyclic",
+        eta_cutoff=0.1,
+        eta_cutoff_schedule="cyclic",
+        tkg_scale=2.0,
+        tkg_schedule="cyclic",
+        temperature=1.0,
+        temperature_schedule="cyclic",
+        repetition_penalty=1.2,
+        repetition_penalty_schedule="cyclic",
+        frequency_penalty=0.5,
+        frequency_penalty_schedule="cyclic",
+        presence_penalty=0.5,
+        presence_penalty_schedule="cyclic",
+        xtc_threshold=0.5,
+        xtc_threshold_schedule="cyclic",
+        xtc_probability=0.5,
+        xtc_probability_schedule="cyclic"
+    )
+
+    assert out_cyclic.shape == (batch_size, seq_len + 2)
