@@ -21,6 +21,19 @@ def dummy_model():
     model = DiffusionModelForConditionalGeneration(config)
     return model
 
+def test_sigmoid_unmasking_schedule(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+    out = dummy_model.generate(
+        input_ids,
+        max_new_tokens=4,
+        steps=5,
+        unmasking_schedule="sigmoid"
+    )
+    assert out.shape == (batch_size, seq_len + 4)
+    assert not (out == dummy_model.config.mask_token_id).any()
+
 def test_generate_dynamic_cfg(dummy_model, mocker):
     batch_size = 2
     seq_len = 4
@@ -646,6 +659,25 @@ def test_num_return_sequences_support(dummy_model, mocker):
 
     assert output.size(0) == 6
     assert output.size(1) == input_ids.size(1) + 4
+
+def test_encoder_frequency_presence_penalty(dummy_model):
+    input_ids = torch.tensor([[1, 2, 2, 3]])
+
+    out_normal = dummy_model.generate(
+        input_ids,
+        max_new_tokens=4,
+        steps=2,
+    )
+
+    out_penalized = dummy_model.generate(
+        input_ids,
+        max_new_tokens=4,
+        steps=2,
+        encoder_frequency_penalty=2.0,
+        encoder_presence_penalty=2.0,
+    )
+
+    assert out_normal.shape == out_penalized.shape
 
 def test_encoder_repetition_penalty(dummy_model):
     input_ids = torch.tensor([[1, 2, 3, 4]])
