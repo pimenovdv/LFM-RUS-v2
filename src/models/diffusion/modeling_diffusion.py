@@ -24,6 +24,11 @@ def get_num_transfer_tokens(mask_index, steps, schedule="linear"):
             frac = x ** 2
         elif schedule == "exponential":
             frac = (math.exp(3 * x) - 1) / (math.exp(3) - 1)
+        elif schedule == "sigmoid":
+            val = 1 / (1 + math.exp(-10 * (x - 0.5)))
+            min_val = 1 / (1 + math.exp(5))
+            max_val = 1 / (1 + math.exp(-5))
+            frac = (val - min_val) / (max_val - min_val)
         else: # linear or fallback
             frac = x
         fractions[i] = frac
@@ -230,6 +235,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         min_tfs_z: float = 1.0,
         dynamic_temperature_entropy: float = 0.0,
         encoder_repetition_penalty: float = 1.0,
+        encoder_frequency_penalty: float = 0.0,
+        encoder_presence_penalty: float = 0.0,
         repetition_penalty: float = 1.0,
         repetition_penalty_schedule: str = "constant",
         min_repetition_penalty: float = 1.0,
@@ -595,7 +602,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_presence_penalty = presence_penalty * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                 current_presence_penalty = max(current_presence_penalty, min_presence_penalty)
 
-                if current_repetition_penalty != 1.0 or current_frequency_penalty != 0.0 or current_presence_penalty != 0.0 or encoder_repetition_penalty != 1.0:
+                if (current_repetition_penalty != 1.0 or current_frequency_penalty != 0.0 or
+                    current_presence_penalty != 0.0 or encoder_repetition_penalty != 1.0 or
+                    encoder_frequency_penalty != 0.0 or encoder_presence_penalty != 0.0):
                     # Apply penalties to already generated/unmasked tokens
                     for b in range(batch_size):
                         # Get tokens in the context (ignoring mask tokens)
@@ -618,14 +627,25 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                 penalty = (current_presence_penalty + counts.float() * current_frequency_penalty).unsqueeze(0)
                                 logits[b, :, unique_tokens] -= penalty.to(logits.device)
 
-                        if encoder_repetition_penalty != 1.0:
+                        if encoder_repetition_penalty != 1.0 or encoder_frequency_penalty != 0.0 or encoder_presence_penalty != 0.0:
                             prompt_tokens = x[b, :T]
                             valid_prompt_tokens = prompt_tokens[prompt_tokens != mask_id]
-                            if valid_prompt_tokens.numel() > 0:
-                                unique_prompt_tokens = torch.unique(valid_prompt_tokens)
-                                score = logits[b, :, unique_prompt_tokens]
-                                penalized_score = torch.where(score < 0, score * encoder_repetition_penalty, score / encoder_repetition_penalty)
-                                logits[b, :, unique_prompt_tokens] = penalized_score
+
+                            if len(valid_prompt_tokens) > 0:
+                                unique_prompt_tokens, counts = torch.unique(valid_prompt_tokens, return_counts=True)
+
+                                if encoder_repetition_penalty != 1.0:
+                                    score = logits[b, :, unique_prompt_tokens]
+                                    penalized_score = torch.where(
+                                        score < 0,
+                                        score * encoder_repetition_penalty,
+                                        score / encoder_repetition_penalty
+                                    )
+                                    logits[b, :, unique_prompt_tokens] = penalized_score
+
+                                if encoder_frequency_penalty != 0.0 or encoder_presence_penalty != 0.0:
+                                    penalty = (encoder_presence_penalty + counts.float() * encoder_frequency_penalty).unsqueeze(0)
+                                    logits[b, :, unique_prompt_tokens] -= penalty.to(logits.device)
 
                 if min_new_tokens is not None and min_new_tokens > 0 and eos_token_id is not None:
                     # current generated tokens count is block_start - T
