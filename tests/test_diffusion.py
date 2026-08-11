@@ -1,5 +1,4 @@
 
-import pytest
 import torch
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, get_num_transfer_tokens, filter_special_tokens
@@ -499,7 +498,6 @@ def test_no_repeat_ngram_size(mocker):
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
 
     input_ids = torch.tensor([[1, 2, 3, 1, 2]])
-    mask_id = config.mask_token_id
 
     with torch.no_grad():
         mock_forward = mocker.patch.object(DiffusionModelForConditionalGeneration, 'forward')
@@ -655,7 +653,6 @@ def test_max_time(mocker):
 
     mock_forward.side_effect = forward_side_effect
 
-    import time
     mock_time = mocker.patch("time.time")
 
     # First call is start time, subsequent calls increase time
@@ -669,7 +666,7 @@ def test_max_time(mocker):
     # We ask for 4 tokens (2 blocks), 2 steps per block
     # Max time is 1.5. So it should break early in the first block
     # or between steps.
-    outputs = model.generate(
+    model.generate(
         input_ids=input_ids,
         max_new_tokens=4,
         steps=4,
@@ -867,7 +864,6 @@ def test_guidance_rescale_schedule(mocker):
 
     from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
     from src.models.diffusion.configuration_diffusion import DiffusionConfig
-    import math
 
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
@@ -949,7 +945,7 @@ def test_penalty_schedules(mocker):
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
-    uncond_ids = torch.tensor([[0, 0]])
+    torch.tensor([[0, 0]])
 
     mock_forward = mocker.patch.object(model, "forward")
 
@@ -1834,3 +1830,94 @@ def test_generate_begin_suppress_tokens(mocker):
     second_block_logits = captured_logits[-1] # the very last step
     assert second_block_logits[0, 0, 3].item() != -float("Inf")
     assert second_block_logits[0, 0, 4].item() != -float("Inf")
+def test_gumbel_temperature_and_schedules_coverage(mocker):
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    generate_func = DiffusionModelForConditionalGeneration.generate
+
+    class DummyModel:
+        def __init__(self):
+            self.config = mocker.MagicMock()
+            self.config.mask_token_id = 0
+            self.config.diffusion_steps = 1
+            self.config.block_size = 64
+            self.config.remasking_strategy = "low_confidence"
+            self.tokenizer = None
+
+        def __call__(self, input_ids, *args, **kwargs):
+            return mocker.MagicMock(logits=torch.randn(input_ids.shape[0], input_ids.shape[1], 10))
+
+        @property
+        def device(self):
+            return torch.device('cpu')
+
+    model = DummyModel()
+    mocker.patch("src.models.diffusion.modeling_diffusion.time.time", return_value=0)
+    mock_input_ids = torch.tensor([[1, 0, 0, 2]])
+
+    # Hit dynamic temperatures + gumbel combinations
+    schedules = ["linear", "cosine", "exponential", "cyclic", "constant"]
+    for schedule in schedules:
+        generate_func(
+            model,
+            input_ids=mock_input_ids,
+            steps=1,
+            max_new_tokens=4,
+            temperature=1.0,
+            temperature_schedule=schedule,
+            gumbel_temperature=2.0,
+            gumbel_temperature_schedule=schedule,
+            min_gumbel_temperature=0.5,
+            typical_p=0.5,
+            typical_p_schedule=schedule,
+            tfs_z=0.5,
+            tfs_z_schedule=schedule,
+            epsilon_cutoff=0.5,
+            epsilon_cutoff_schedule=schedule,
+            eta_cutoff=0.5,
+            eta_cutoff_schedule=schedule
+        )
+
+def test_remasking_entropy_coverage(mocker):
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    generate_func = DiffusionModelForConditionalGeneration.generate
+
+    class DummyModel:
+        def __init__(self):
+            self.config = mocker.MagicMock()
+            self.config.mask_token_id = 0
+            self.config.diffusion_steps = 1
+            self.config.block_size = 64
+            self.config.remasking_strategy = "entropy"
+            self.tokenizer = None
+
+        def __call__(self, input_ids, *args, **kwargs):
+            return mocker.MagicMock(logits=torch.randn(input_ids.shape[0], input_ids.shape[1], 10))
+
+        @property
+        def device(self):
+            return torch.device('cpu')
+
+    model = DummyModel()
+    mocker.patch("src.models.diffusion.modeling_diffusion.time.time", return_value=0)
+    mock_input_ids = torch.tensor([[1, 0, 0, 2]])
+
+    generate_func(
+        model,
+        input_ids=mock_input_ids,
+        steps=1,
+        max_new_tokens=4,
+        encoder_frequency_penalty=2.0,
+        encoder_presence_penalty=2.0,
+        encoder_repetition_penalty=2.0,
+        encoder_no_repeat_ngram_size=2
+    )
+
+def test_get_num_transfer_tokens_schedule_sigmoid(mocker):
+    from src.models.diffusion.modeling_diffusion import get_num_transfer_tokens
+
+    mask_index = torch.ones((2, 10), dtype=torch.bool)
+    steps = 4
+
+    # Test sigmoid
+    res_sigmoid = get_num_transfer_tokens(mask_index, steps, schedule="sigmoid")
+    assert res_sigmoid.shape == (2, 4)
