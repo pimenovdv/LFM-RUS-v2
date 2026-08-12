@@ -3,7 +3,7 @@ import logging
 import os
 from typing import List, Dict, Any
 from datasets import Dataset, load_dataset
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import pipeline
 
 logger = logging.getLogger(__name__)
 

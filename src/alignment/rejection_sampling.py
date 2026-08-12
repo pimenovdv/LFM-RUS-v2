@@ -3,7 +3,7 @@ import json
 import logging
 import os
 from typing import List, Dict, Any
-from datasets import Dataset, load_dataset
+from datasets import load_dataset
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from src.sft import run_sft
 

@@ -160,7 +160,7 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
             if name == "accuracy":
                 reward_funcs.append(get_reward_function('accuracy'))
             elif name == "variance":
-                print(f"Warning: variance_reward not strictly defined. Falling back to length_penalty")
+                print("Warning: variance_reward not strictly defined. Falling back to length_penalty")
                 reward_funcs.append(get_reward_function('length_penalty'))
             else:
                 print(f"Warning: Unknown reward function {name}")
@@ -453,7 +453,6 @@ def run_alignment_pipeline(cfg: Dict[str, Any], dummy_data: bool = False):
 
 
         from transformers import AutoModelForSequenceClassification
-        import torch
 
         device_map = "auto" if not cfg.get("use_cpu", True) else None
 
