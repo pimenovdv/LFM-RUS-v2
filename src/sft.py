@@ -6,7 +6,6 @@ from src.models.diffusion.modeling_diffusion import DiffusionModelForConditional
 
 import torch
 from transformers import DataCollatorForLanguageModeling
-import numpy as np
 
 
 class SFTDiffusionDataCollator(DataCollatorForLanguageModeling):

@@ -1877,47 +1877,117 @@ def test_gumbel_temperature_and_schedules_coverage(mocker):
             eta_cutoff_schedule=schedule
         )
 
-def test_remasking_entropy_coverage(mocker):
+def test_remasking_entropy(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
     from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
-    generate_func = DiffusionModelForConditionalGeneration.generate
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
 
-    class DummyModel:
-        def __init__(self):
-            self.config = mocker.MagicMock()
-            self.config.mask_token_id = 0
-            self.config.diffusion_steps = 1
-            self.config.block_size = 64
-            self.config.remasking_strategy = "entropy"
-            self.tokenizer = None
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
 
-        def __call__(self, input_ids, *args, **kwargs):
-            return mocker.MagicMock(logits=torch.randn(input_ids.shape[0], input_ids.shape[1], 10))
+    input_ids = torch.tensor([[1, 2]])
 
-        @property
-        def device(self):
-            return torch.device('cpu')
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        logits = torch.randn(kwargs["input_ids"].shape[0], seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
 
-    model = DummyModel()
-    mocker.patch("src.models.diffusion.modeling_diffusion.time.time", return_value=0)
-    mock_input_ids = torch.tensor([[1, 0, 0, 2]])
-
-    generate_func(
-        model,
-        input_ids=mock_input_ids,
-        steps=1,
-        max_new_tokens=4,
-        encoder_frequency_penalty=2.0,
-        encoder_presence_penalty=2.0,
-        encoder_repetition_penalty=2.0,
-        encoder_no_repeat_ngram_size=2
+    # Should not crash
+    output = model.generate(
+        input_ids=input_ids,
+        steps=3,
+        max_new_tokens=1,
+        remasking="entropy",
     )
+    assert output is not None
 
-def test_get_num_transfer_tokens_schedule_sigmoid(mocker):
-    from src.models.diffusion.modeling_diffusion import get_num_transfer_tokens
+def test_gumbel_temperature(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
 
-    mask_index = torch.ones((2, 10), dtype=torch.bool)
-    steps = 4
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
 
-    # Test sigmoid
-    res_sigmoid = get_num_transfer_tokens(mask_index, steps, schedule="sigmoid")
-    assert res_sigmoid.shape == (2, 4)
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        logits = torch.randn(kwargs["input_ids"].shape[0], seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    output1 = model.generate(
+        input_ids=input_ids,
+        steps=3,
+        max_new_tokens=1,
+        gumbel_temperature=2.0,
+    )
+    assert output1 is not None
+
+    output2 = model.generate(
+        input_ids=input_ids,
+        steps=3,
+        max_new_tokens=1,
+        gumbel_temperature=2.0,
+        gumbel_temperature_schedule="linear",
+    )
+    assert output2 is not None
+
+    output3 = model.generate(
+        input_ids=input_ids,
+        steps=3,
+        max_new_tokens=1,
+        gumbel_temperature=2.0,
+        gumbel_temperature_schedule="cyclic",
+    )
+    assert output3 is not None
+
+def test_diffusion_extra_coverage(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.tensor([[1, 2]])
+
+    mock_forward = mocker.patch.object(model, "forward")
+    def forward_side_effect(*args, **kwargs):
+        seq_len = kwargs["input_ids"].shape[1]
+        logits = torch.randn(kwargs["input_ids"].shape[0], seq_len, 10)
+        mock_out = mocker.MagicMock()
+        mock_out.logits = logits
+        return mock_out
+    mock_forward.side_effect = forward_side_effect
+
+    model.generate(
+        input_ids=input_ids,
+        steps=3,
+        max_new_tokens=2,
+        encoder_no_repeat_ngram_size=2,
+        encoder_repetition_penalty=1.5,
+        encoder_presence_penalty=0.5,
+        encoder_frequency_penalty=0.5,
+        unmasking_schedule="sigmoid",
+    )

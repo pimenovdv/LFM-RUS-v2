@@ -204,6 +204,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         temperature: float = 0.0,
         temperature_schedule: str = "constant",
         min_temperature: float = 0.0,
+        gumbel_temperature: Optional[float] = None,
+        gumbel_temperature_schedule: str = "constant",
+        min_gumbel_temperature: float = 0.0,
         cfg_scale: float = 0.0,
         cfg_schedule: str = "constant",
         guidance_rescale: float = 0.0,
@@ -925,6 +928,22 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     else:
                         current_temperature = max(current_temperature, min_temperature)
 
+                # Gumbel temperature scheduling
+                gumbel_t = gumbel_temperature if gumbel_temperature is not None else temperature
+                current_gumbel_temperature = gumbel_t
+                if gumbel_t > 0.0 and gumbel_temperature_schedule != "constant":
+                    if gumbel_temperature_schedule == "linear":
+                        current_gumbel_temperature = gumbel_t * (1.0 - step_ratio)
+                    elif gumbel_temperature_schedule == "cosine":
+                        current_gumbel_temperature = gumbel_t * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif gumbel_temperature_schedule == "exponential":
+                        current_gumbel_temperature = gumbel_t * math.exp(-3.0 * step_ratio)
+                    elif gumbel_temperature_schedule == "cyclic":
+                        current_gumbel_temperature = gumbel_t * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                if current_gumbel_temperature is not None and not isinstance(current_gumbel_temperature, torch.Tensor):
+                    current_gumbel_temperature = max(current_gumbel_temperature, min_gumbel_temperature)
+
                 if logit_smoothing > 0.0:
                     logits = logits * (1 - logit_smoothing) + logits.mean(dim=-1, keepdim=True) * logit_smoothing
 
@@ -935,12 +954,12 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     scores.append(logits.clone())
 
                 # Check if current_temperature is > 0 (can be a tensor or float)
-                is_temp_positive = (current_temperature > 0).any() if isinstance(current_temperature, torch.Tensor) else (current_temperature > 0)
+                is_temp_positive = (current_gumbel_temperature > 0).any() if isinstance(current_gumbel_temperature, torch.Tensor) else (current_gumbel_temperature > 0)
 
                 if is_temp_positive:
                     logits_f = logits.to(torch.float32)
                     noise = torch.rand_like(logits_f)
-                    gumbel_noise = (-torch.log(noise.clamp(min=1e-9))) ** current_temperature
+                    gumbel_noise = (-torch.log(noise.clamp(min=1e-9))) ** current_gumbel_temperature
 
                     # For masked items, logits is -inf, so exp() is 0. 0 / gumbel_noise is 0.
                     logits_with_noise = logits_f.exp() / gumbel_noise
@@ -956,6 +975,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     p = F.softmax(logits.to(torch.float64), dim=-1)
                     x0_p = torch.squeeze(
                         torch.gather(p, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
+                elif remasking == 'entropy':
+                    p = F.softmax(logits.to(torch.float64), dim=-1)
+                    entropy = -torch.sum(p * torch.log(p + 1e-9), dim=-1)
+                    # Lower entropy means higher confidence
+                    x0_p = -entropy
                 elif remasking == 'random':
                     x0_p = torch.rand((x0.shape[0], x0.shape[1]), device=x0.device)
                 else:
