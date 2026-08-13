@@ -232,6 +232,161 @@ def test_dynamic_temperature_schedule(dummy_model):
     assert out_exponential.shape == (batch_size, seq_len + 2)
 
 
+def test_dynamic_temperature_entropy_schedule(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_linear = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        temperature=1.0,
+        dynamic_temperature_entropy=1.0,
+        dynamic_temperature_entropy_schedule="linear",
+        min_dynamic_temperature_entropy=0.1
+    )
+
+    out_cosine = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        temperature=1.0,
+        dynamic_temperature_entropy=1.0,
+        dynamic_temperature_entropy_schedule="cosine",
+        min_dynamic_temperature_entropy=0.1
+    )
+
+    out_exponential = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        temperature=1.0,
+        dynamic_temperature_entropy=1.0,
+        dynamic_temperature_entropy_schedule="exponential",
+        min_dynamic_temperature_entropy=0.1
+    )
+
+    out_cyclic = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        temperature=1.0,
+        dynamic_temperature_entropy=1.0,
+        dynamic_temperature_entropy_schedule="cyclic",
+        min_dynamic_temperature_entropy=0.1
+    )
+
+    assert out_linear.shape == (batch_size, seq_len + 2)
+    assert out_cosine.shape == (batch_size, seq_len + 2)
+    assert out_exponential.shape == (batch_size, seq_len + 2)
+    assert out_cyclic.shape == (batch_size, seq_len + 2)
+
+
+def test_top_n_tokens(dummy_model, mocker):
+    batch_size = 1
+    seq_len = 2
+    vocab_size = dummy_model.config.base_config_dict.get('vocab_size', 100)
+    input_ids = torch.tensor([[10, 11]])
+
+    # Mock outputs so we know exact logits
+    # We want to have 5 known high values, and the rest zeros or negative.
+    def mock_forward(*args, **kwargs):
+        class MockOutput:
+            def __init__(self):
+                # Shape (batch_size, seq_len + max_new_tokens, vocab_size)
+                self.logits = torch.zeros(batch_size, seq_len + 1, vocab_size)
+                # Set values for the new token (index `seq_len` = 2)
+                self.logits[0, 2, 5] = 10.0
+                self.logits[0, 2, 4] = 9.0
+                self.logits[0, 2, 3] = 8.0
+                self.logits[0, 2, 2] = 7.0
+                self.logits[0, 2, 1] = 6.0
+                self.logits[0, 2, 0] = 5.0
+            @property
+            def past_key_values(self):
+                return None
+            @property
+            def hidden_states(self):
+                return None
+            @property
+            def attentions(self):
+                return None
+        return MockOutput()
+
+    mocker.patch.object(dummy_model, "__call__", side_effect=mock_forward)
+
+    # Use a mock stopping criteria to stop after 1 generation step to inspect internals if needed,
+    # but we can just use max_new_tokens=1 and output_scores=True
+    out = dummy_model.generate(
+        input_ids,
+        max_new_tokens=1,
+        steps=1,
+        top_n_tokens=3,
+        return_dict_in_generate=True,
+        output_scores=True
+    )
+
+    # Check that scores has all except top 3 as -inf
+    # For a newly generated token, top_n_tokens=3 should leave indices 5, 4, 3 as finite, others -inf
+    logits_step = out["scores"][0] # (batch_size, seq_len+1, vocab_size)
+    # The generated token is at index 2 (since prompt is length 2)
+    new_token_logits = logits_step[0, 2, :]
+
+    # The generated token is at index 2 (since prompt is length 2)
+    new_token_logits = logits_step[0, 2, :]
+
+    # Check that there are exactly 3 finite values
+    assert torch.sum(torch.isfinite(new_token_logits)) == 3
+
+
+def test_dynamic_top_n_tokens_schedule(dummy_model):
+    batch_size = 2
+    seq_len = 4
+    input_ids = torch.randint(1, 100, (batch_size, seq_len))
+
+    out_linear = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        top_n_tokens=10,
+        top_n_tokens_schedule="linear",
+        min_top_n_tokens=2
+    )
+
+    out_cosine = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        top_n_tokens=10,
+        top_n_tokens_schedule="cosine",
+        min_top_n_tokens=2
+    )
+
+    out_exponential = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        top_n_tokens=10,
+        top_n_tokens_schedule="exponential",
+        min_top_n_tokens=2
+    )
+
+    out_cyclic = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        top_n_tokens=10,
+        top_n_tokens_schedule="cyclic",
+        min_top_n_tokens=2
+    )
+
+    assert out_linear.shape == (batch_size, seq_len + 2)
+    assert out_cosine.shape == (batch_size, seq_len + 2)
+    assert out_exponential.shape == (batch_size, seq_len + 2)
+    assert out_cyclic.shape == (batch_size, seq_len + 2)
+
+
 def test_dynamic_top_k_schedule(dummy_model):
     batch_size = 2
     seq_len = 4

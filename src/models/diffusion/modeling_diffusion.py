@@ -236,7 +236,12 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         tfs_z: float = 1.0,
         tfs_z_schedule: str = "constant",
         min_tfs_z: float = 1.0,
+        top_n_tokens: int = 0,
+        top_n_tokens_schedule: str = "constant",
+        min_top_n_tokens: int = 0,
         dynamic_temperature_entropy: float = 0.0,
+        dynamic_temperature_entropy_schedule: str = "constant",
+        min_dynamic_temperature_entropy: float = 0.0,
         encoder_repetition_penalty: float = 1.0,
         encoder_frequency_penalty: float = 0.0,
         encoder_presence_penalty: float = 0.0,
@@ -661,6 +666,26 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         else:
                             logits[:, :, eos_token_id] = -float("Inf")
 
+                current_top_n_tokens = top_n_tokens
+                if top_n_tokens > 0:
+                    if top_n_tokens_schedule == "linear":
+                        current_top_n_tokens = int(top_n_tokens * (1.0 - step_ratio))
+                    elif top_n_tokens_schedule == "cosine":
+                        current_top_n_tokens = int(top_n_tokens * 0.5 * (1.0 + math.cos(math.pi * step_ratio)))
+                    elif top_n_tokens_schedule == "exponential":
+                        current_top_n_tokens = int(top_n_tokens * math.exp(-3.0 * step_ratio))
+                    elif top_n_tokens_schedule == "cyclic":
+                        current_top_n_tokens = int(top_n_tokens * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio)))
+
+                    current_top_n_tokens = max(current_top_n_tokens, min_top_n_tokens)
+
+                if current_top_n_tokens > 0:
+                    vocab_size = logits.size(-1)
+                    if current_top_n_tokens < vocab_size:
+                        top_n_values, top_n_indices = torch.topk(logits, current_top_n_tokens, dim=-1)
+                        min_top_n_values = top_n_values[..., -1:]
+                        logits = torch.where(logits < min_top_n_values, torch.full_like(logits, -float("Inf")), logits)
+
                 current_xtc_threshold = xtc_threshold
                 if xtc_threshold > 0.0:
                     if xtc_threshold_schedule == "linear":
@@ -918,9 +943,21 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_temperature = temperature * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
 
                     if dynamic_temperature_entropy > 0.0:
+                        current_dynamic_temperature_entropy = dynamic_temperature_entropy
+                        if dynamic_temperature_entropy_schedule == "linear":
+                            current_dynamic_temperature_entropy = dynamic_temperature_entropy * (1.0 - step_ratio)
+                        elif dynamic_temperature_entropy_schedule == "cosine":
+                            current_dynamic_temperature_entropy = dynamic_temperature_entropy * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                        elif dynamic_temperature_entropy_schedule == "exponential":
+                            current_dynamic_temperature_entropy = dynamic_temperature_entropy * math.exp(-3.0 * step_ratio)
+                        elif dynamic_temperature_entropy_schedule == "cyclic":
+                            current_dynamic_temperature_entropy = dynamic_temperature_entropy * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                        current_dynamic_temperature_entropy = max(current_dynamic_temperature_entropy, min_dynamic_temperature_entropy)
+
                         probs = F.softmax(logits, dim=-1)
                         entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
-                        current_temperature = current_temperature + dynamic_temperature_entropy * entropy
+                        current_temperature = current_temperature + current_dynamic_temperature_entropy * entropy
 
                     # Handle case where current_temperature becomes a tensor (from entropy)
                     if isinstance(current_temperature, torch.Tensor):
