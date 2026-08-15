@@ -1,4 +1,3 @@
-import re
 
 with open("tests/test_diffusion.py", "r") as f:
     content = f.read()

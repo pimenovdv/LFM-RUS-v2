@@ -1,4 +1,3 @@
-from src.alignment.rejection_sampling import run_rejection_sampling
 from datasets import Dataset
 import pytest
 from src.alignment.pipeline import run_alignment_pipeline, accuracy_reward, variance_reward
