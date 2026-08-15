@@ -148,8 +148,8 @@ def test_run_cpt_embedding_warmup(mocker):
 def test_run_cpt_wsd(mocker):
     # Mocking HF components
     mock_tokenizer = mocker.patch("src.cpt.AutoTokenizer.from_pretrained")
-    mock_model = mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
-    mock_trainer = mocker.patch("src.cpt.Trainer")
+    mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
+    mocker.patch("src.cpt.Trainer")
     mock_ta = mocker.patch("src.cpt.TrainingArguments")
     mocker.patch("src.cpt.DataCollatorForLanguageModeling")
 
@@ -177,8 +177,8 @@ def test_run_cpt_wsd(mocker):
 def test_run_cpt_block_diffusion(mocker):
     # Mocking HF components
     mock_tokenizer = mocker.patch("src.cpt.AutoTokenizer.from_pretrained")
-    mock_model = mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
-    mock_trainer = mocker.patch("src.cpt.Trainer")
+    mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
+    mocker.patch("src.cpt.Trainer")
     mocker.patch("src.cpt.TrainingArguments")
     mock_bd_collator = mocker.patch("src.cpt.BlockDiffusionDataCollator")
 
@@ -203,8 +203,8 @@ def test_run_cpt_block_diffusion(mocker):
 def test_run_cpt_top_k_merge(mocker):
     # Mocking HF components
     mock_tokenizer = mocker.patch("src.cpt.AutoTokenizer.from_pretrained")
-    mock_model = mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
-    mock_trainer = mocker.patch("src.cpt.Trainer")
+    mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
+    mocker.patch("src.cpt.Trainer")
     mocker.patch("src.cpt.TrainingArguments")
     mocker.patch("src.cpt.DataCollatorForLanguageModeling")
 
@@ -260,7 +260,6 @@ def test_merge_top_k_checkpoints(mocker, tmp_path):
     from src.cpt import merge_top_k_checkpoints
     import torch
     import safetensors.torch
-    import os
 
     # Create mock checkpoints
     ckpt1 = tmp_path / "checkpoint-10"

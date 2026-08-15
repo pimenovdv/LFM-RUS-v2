@@ -836,7 +836,7 @@ def test_encoder_frequency_presence_penalty(dummy_model):
 
 def test_encoder_repetition_penalty(dummy_model):
     input_ids = torch.tensor([[1, 2, 3, 4]])
-    out_normal = dummy_model.generate(
+    dummy_model.generate(
         input_ids,
         max_new_tokens=4,
         steps=2,

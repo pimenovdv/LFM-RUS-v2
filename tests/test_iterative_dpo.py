@@ -1,8 +1,6 @@
-import pytest
 from unittest.mock import MagicMock
 from src.alignment.iterative_dpo import run_iterative_dpo_iteration
 from src.alignment.pipeline import run_alignment_pipeline
-import os
 
 def test_run_iterative_dpo_iteration(mocker):
     # Mock generate_responses and evaluate_with_llm_judge
@@ -41,8 +39,8 @@ def test_run_alignment_pipeline_iterative_dpo(mocker):
     mocker.patch("src.alignment.pipeline.DPOTrainer.save_model")
 
     # Mock tokenizer and model
-    mock_model = MagicMock()
-    mock_tokenizer = MagicMock()
+    MagicMock()
+    MagicMock()
 
     cfg = {
         "method": "iterative_dpo",

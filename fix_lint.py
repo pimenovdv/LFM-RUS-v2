@@ -1,4 +1,3 @@
-import re
 
 with open("src/models/diffusion/__init__.py", "r") as f:
     content = f.read()

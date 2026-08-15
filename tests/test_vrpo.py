@@ -1,8 +1,6 @@
 from src.alignment.vrpo import VRPOConfig, VRPOTrainer
 import pytest
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from datasets import Dataset
 
 def test_vrpo_config_initialization():
     config = VRPOConfig(

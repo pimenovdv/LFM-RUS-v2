@@ -1991,3 +1991,119 @@ def test_diffusion_extra_coverage(mocker):
         encoder_frequency_penalty=0.5,
         unmasking_schedule="sigmoid",
     )
+
+def test_ngram_penalty(mocker):
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=1, diffusion_steps=1)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.tensor([[1, 2, 3, 1, 2]])
+
+    with torch.no_grad():
+        mock_forward = mocker.patch.object(DiffusionModelForConditionalGeneration, 'forward')
+        vocab_size = 10
+
+        out_logits = torch.zeros(1, 6, vocab_size)
+        out_logits[:, -1, 3] = 10.0
+        out_logits[:, -1, 4] = 5.0
+
+        def forward_side_effect_no_penalty(*args, **kwargs):
+            seq_len = kwargs.get('input_ids', args[0] if args else None).shape[1]
+            out = torch.zeros(1, seq_len, vocab_size)
+            out[:, -1, 3] = 10.0
+            out[:, -1, 4] = 5.0
+            mock_out = mocker.MagicMock()
+            mock_out.logits = out
+            return mock_out
+
+        mock_forward.side_effect = forward_side_effect_no_penalty
+        outputs_no_penalty = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=1,
+            block_length=1,
+            steps=1,
+            ngram_penalty=1.0,
+            ngram_size=2
+        )
+
+        # Test 2: ngram_penalty=10.0 (high penalty)
+        def forward_side_effect_penalty(*args, **kwargs):
+            seq_len = kwargs.get('input_ids', args[0] if args else None).shape[1]
+            out = torch.zeros(1, seq_len, vocab_size)
+            out[:, -1, 3] = 10.0
+            out[:, -1, 4] = 5.0
+            mock_out = mocker.MagicMock()
+            mock_out.logits = out
+            return mock_out
+
+        mock_forward.side_effect = forward_side_effect_penalty
+        outputs_penalty = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=1,
+            block_length=1,
+            steps=1,
+            ngram_penalty=10.0,
+            ngram_size=2
+        )
+
+        # Because token 3 completes the ngram [1, 2, 3], its logit (10.0) will be divided by 10.0 -> 1.0.
+        # Token 4 logit is 5.0. Thus token 4 becomes argmax.
+        assert outputs_no_penalty[0, -1].item() == 3
+        assert outputs_penalty[0, -1].item() == 4
+
+def test_temperature_mask(mocker):
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=2, diffusion_steps=1)
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.tensor([[1, 2]])
+    temp_mask = torch.tensor([[1.0, 0.0]])
+
+    with torch.no_grad():
+        mock_forward = mocker.patch.object(DiffusionModelForConditionalGeneration, 'forward')
+        vocab_size = 10
+
+        out_logits = torch.zeros(1, 2, vocab_size)
+        out_logits[:, 0, 3] = 10.0
+        out_logits[:, 0, 4] = 9.0
+        out_logits[:, 1, 5] = 10.0
+        out_logits[:, 1, 6] = 9.0
+
+        def forward_side_effect(*args, **kwargs):
+            mock_out = mocker.MagicMock()
+            mock_out.logits = out_logits.clone()
+            return mock_out
+
+        mock_forward.side_effect = forward_side_effect
+
+        # Test temperature_mask
+        outputs = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=0,
+            block_length=2,
+            steps=1,
+            temperature=2.0,
+            temperature_mask=temp_mask,
+            gumbel_temperature=None # Should fallback to temperature
+        )
+
+        # It should run successfully without errors
+        assert outputs.shape == (1, 2)

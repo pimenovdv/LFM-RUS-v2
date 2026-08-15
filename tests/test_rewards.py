@@ -1,5 +1,5 @@
 import pytest
-from src.alignment.rewards.rewards import get_reward_function, ModelBasedReward, accuracy_reward, format_reward, length_penalty_reward
+from src.alignment.rewards.rewards import get_reward_function, accuracy_reward, format_reward, length_penalty_reward
 
 def test_accuracy_reward():
     completions = ["This has a <solution>", "This does not have it"]

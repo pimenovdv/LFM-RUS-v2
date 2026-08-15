@@ -85,7 +85,6 @@ def test_run_sft_no_datasets(mocker):
         run_sft(cfg, dummy_data=False)
 
 
-import torch
 from src.sft import SFTDiffusionDataCollator
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
 

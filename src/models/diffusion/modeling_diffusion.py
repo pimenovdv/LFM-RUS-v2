@@ -267,6 +267,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         tkg_min_scale: float = 0.0,
         encoder_no_repeat_ngram_size: int = 0,
         no_repeat_ngram_size: int = 0,
+        ngram_penalty: float = 1.0,
+        ngram_size: int = 0,
+        temperature_mask: Optional[torch.Tensor] = None,
         bad_words_ids: Optional[list[list[int]]] = None,
         max_time: Optional[float] = None,
         remove_invalid_values: bool = False,
@@ -557,6 +560,35 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                 if banned_tokens:
                                     for bt in banned_tokens:
                                         logits[b, pos, bt] = -float("Inf")
+
+                if ngram_penalty != 1.0 and ngram_size > 0:
+                    for b in range(batch_size):
+                        seq = x[b, :block_end]
+                        for pos in range(block_start, block_end):
+                            if pos < ngram_size - 1:
+                                continue
+
+                            prev_tokens = seq[pos - (ngram_size - 1):pos]
+                            if mask_id not in prev_tokens:
+                                prefix_list = prev_tokens.tolist()
+                                counts: dict[int, int] = {}
+
+                                for start_idx in range(pos - ngram_size + 1):
+                                    window = seq[start_idx:start_idx + ngram_size - 1].tolist()
+                                    if window == prefix_list:
+                                        next_token = seq[start_idx + ngram_size - 1].item()
+                                        if next_token != mask_id:
+                                            counts[next_token] = counts.get(next_token, 0) + 1
+
+                                for tok, count in counts.items():
+                                    score = logits[b, pos, tok]
+                                    penalty_factor = ngram_penalty ** count
+                                    penalized_score = torch.where(
+                                        score < 0,
+                                        score * penalty_factor,
+                                        score / penalty_factor
+                                    )
+                                    logits[b, pos, tok] = penalized_score
 
                 if bad_words_ids is not None:
                     for b in range(batch_size):
@@ -964,6 +996,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_temperature = torch.clamp(current_temperature, min=min_temperature)
                     else:
                         current_temperature = max(current_temperature, min_temperature)
+
+                if temperature_mask is not None:
+                    current_mask = temperature_mask[:, block_start:block_end]
+                    current_temperature = current_temperature * current_mask
 
                 # Gumbel temperature scheduling
                 gumbel_t = gumbel_temperature if gumbel_temperature is not None else temperature
