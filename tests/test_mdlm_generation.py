@@ -947,3 +947,91 @@ def test_cyclic_schedules_coverage(dummy_model):
     )
 
     assert out_cyclic.shape == (batch_size, seq_len + 2)
+
+def test_length_penalty_and_schedules(dummy_model, mocker):
+    input_ids = torch.tensor([[10, 20]])
+    dummy_model.unmasking_schedule = "linear"
+
+    # Mock forward to return constant logits
+    def mock_forward(input_ids, *args, **kwargs):
+        class MockOutput:
+            loss = torch.tensor(0.1)
+            logits = torch.ones(input_ids.shape[0], input_ids.shape[1], 100)
+
+            def __getitem__(self, i):
+                if i == 0:
+                    return self.loss
+                elif i == 1:
+                    return self.logits
+                raise IndexError
+        return MockOutput()
+
+    dummy_model.forward = mock_forward
+
+    # Constant schedule
+    out = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=1,
+        length_penalty=2.0,
+        eos_token_id=50,
+        return_dict_in_generate=True,
+        output_scores=True
+    )
+    assert out is not None
+
+    # Linear schedule
+    out_linear = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        length_penalty=2.0,
+        length_penalty_schedule="linear",
+        min_length_penalty=1.0,
+        eos_token_id=50,
+        return_dict_in_generate=True,
+        output_scores=True
+    )
+    assert out_linear is not None
+
+    # Cosine schedule
+    out_cosine = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        length_penalty=2.0,
+        length_penalty_schedule="cosine",
+        min_length_penalty=1.0,
+        eos_token_id=50,
+        return_dict_in_generate=True,
+        output_scores=True
+    )
+    assert out_cosine is not None
+
+    # Exponential schedule
+    out_exp = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        length_penalty=0.5,
+        length_penalty_schedule="exponential",
+        min_length_penalty=0.5,
+        eos_token_id=50,
+        return_dict_in_generate=True,
+        output_scores=True
+    )
+    assert out_exp is not None
+
+    # Cyclic schedule
+    out_cyclic = dummy_model.generate(
+        input_ids,
+        max_new_tokens=2,
+        steps=2,
+        length_penalty=2.0,
+        length_penalty_schedule="cyclic",
+        min_length_penalty=1.0,
+        eos_token_id=50,
+        return_dict_in_generate=True,
+        output_scores=True
+    )
+    assert out_cyclic is not None
