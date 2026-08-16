@@ -254,6 +254,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         presence_penalty: float = 0.0,
         presence_penalty_schedule: str = "constant",
         min_presence_penalty: float = 0.0,
+        length_penalty: float = 1.0,
+        length_penalty_schedule: str = "constant",
+        min_length_penalty: float = 1.0,
         penalty_range: Optional[int] = None,
         logit_smoothing: float = 0.0,
         xtc_threshold: float = 0.0,
@@ -697,6 +700,29 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                 logits[:, :, eos_id] = -float("Inf")
                         else:
                             logits[:, :, eos_token_id] = -float("Inf")
+
+                current_length_penalty = length_penalty
+                if length_penalty != 1.0 and eos_token_id is not None:
+                    if length_penalty_schedule == "linear":
+                        current_length_penalty = length_penalty * (1.0 - step_ratio) + 1.0 * step_ratio
+                    elif length_penalty_schedule == "cosine":
+                        current_length_penalty = 1.0 + (length_penalty - 1.0) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif length_penalty_schedule == "exponential":
+                        current_length_penalty = 1.0 + (length_penalty - 1.0) * math.exp(-3.0 * step_ratio)
+                    elif length_penalty_schedule == "cyclic":
+                        current_length_penalty = 1.0 + (length_penalty - 1.0) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    if isinstance(current_length_penalty, float):
+                        current_length_penalty = max(current_length_penalty, min_length_penalty) if length_penalty > 1.0 else min(current_length_penalty, min_length_penalty)
+
+                    if current_length_penalty != 1.0:
+                        eos_ids = eos_token_id if isinstance(eos_token_id, list) else [eos_token_id]
+                        for eos_id in eos_ids:
+                            score = logits[:, :, eos_id]
+                            score = torch.where(
+                                score < 0, score * current_length_penalty, score / current_length_penalty
+                            )
+                            logits[:, :, eos_id] = score
 
                 current_top_n_tokens = top_n_tokens
                 if top_n_tokens > 0:
