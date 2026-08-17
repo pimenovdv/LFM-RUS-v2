@@ -7,6 +7,12 @@ import numpy as np
 import time
 import math
 
+try:
+    from transformers import WatermarkingConfig, WatermarkLogitsProcessor
+except ImportError:
+    WatermarkingConfig = None
+    WatermarkLogitsProcessor = None
+
 from .configuration_diffusion import DiffusionConfig
 
 def get_num_transfer_tokens(mask_index, steps, schedule="linear"):
@@ -297,6 +303,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         output_scores: bool = False,
         logits_processor: Optional[LogitsProcessorList] = None,
         stopping_criteria: Optional[StoppingCriteriaList] = None,
+        watermarking_config: Optional[Union[dict, 'WatermarkingConfig']] = None,
         **kwargs
     ):
         """
@@ -370,6 +377,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         scores = [] if return_dict_in_generate and output_scores else None
 
+        watermark_processor = None
+
         for num_block in range(num_blocks):
             if max_time is not None and time.time() - start_time > max_time:
                 break
@@ -402,6 +411,33 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     steering_scale=steering_scale
                 )
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+
+                if watermarking_config is not None and WatermarkLogitsProcessor is not None:
+                    if watermark_processor is None:
+                        watermark_kwargs = watermarking_config if isinstance(watermarking_config, dict) else vars(watermarking_config)
+                        watermark_processor = WatermarkLogitsProcessor(vocab_size=logits.size(-1), device=logits.device, **watermark_kwargs)
+
+                    mask_positions = mask_index.nonzero(as_tuple=True)
+                    if len(mask_positions[0]) > 0:
+                        context_width = watermark_kwargs.get("context_width", 1)
+                        pseudo_input_ids = []
+                        pseudo_scores = []
+                        valid_indices = []
+
+                        for b, s in zip(mask_positions[0], mask_positions[1]):
+                            if s >= context_width:
+                                pseudo_input_ids.append(x[b, s - context_width:s])
+                                pseudo_scores.append(logits[b, s])
+                                valid_indices.append((b, s))
+
+                        if len(pseudo_input_ids) > 0:
+                            pseudo_input_ids = torch.stack(pseudo_input_ids)
+                            pseudo_scores = torch.stack(pseudo_scores)
+
+                            new_pseudo_scores = watermark_processor(pseudo_input_ids, pseudo_scores)
+
+                            for i, (b, s) in enumerate(valid_indices):
+                                logits[b, s] = new_pseudo_scores[i]
 
                 if remove_invalid_values:
                     # set all nan values to 0.0
