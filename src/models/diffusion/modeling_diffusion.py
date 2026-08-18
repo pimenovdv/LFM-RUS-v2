@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from transformers import PreTrainedModel, AutoConfig, AutoModel, LogitsProcessorList, StoppingCriteriaList
 import torch.nn.functional as F
-from typing import Optional, Union
+from typing import Optional, Union, Callable
 import numpy as np
 import time
 import math
@@ -298,6 +298,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         forced_eos_token_id: Optional[Union[int, list[int]]] = None,
         renormalize_logits: bool = False,
         unmasking_schedule: str = "linear",
+        classifier_fn: Optional[Callable] = None,
+        classifier_scale: float = 0.0,
+        classifier_schedule: str = "constant",
+        min_classifier_scale: float = 0.0,
         num_return_sequences: int = 1,
         return_dict_in_generate: bool = False,
         output_scores: bool = False,
@@ -536,6 +540,27 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                     # Column normalization
                     logits = F.log_softmax(guided_logits, dim=-1)
+
+                if classifier_fn is not None and classifier_scale > 0.0:
+                    if classifier_schedule == "linear":
+                        current_classifier_scale = classifier_scale * (1.0 - step_ratio)
+                    elif classifier_schedule == "cosine":
+                        current_classifier_scale = classifier_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif classifier_schedule == "exponential":
+                        current_classifier_scale = classifier_scale * math.exp(-3.0 * step_ratio)
+                    elif classifier_schedule == "cyclic":
+                        current_classifier_scale = classifier_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_classifier_scale = classifier_scale
+
+                    current_classifier_scale = max(current_classifier_scale, min_classifier_scale)
+
+                    with torch.enable_grad():
+                        logits_with_grad = logits.detach().requires_grad_(True)
+                        classifier_score = classifier_fn(logits_with_grad, x, current_timesteps)
+                        grads = torch.autograd.grad(classifier_score.sum(), logits_with_grad)[0]
+
+                    logits = logits + current_classifier_scale * grads
 
                 if suppress_tokens is not None:
                     logits[:, :, suppress_tokens] = -float("Inf")
