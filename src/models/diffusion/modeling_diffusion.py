@@ -297,8 +297,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         forced_decoder_ids: Optional[list[list[int]]] = None,
         forced_eos_token_id: Optional[Union[int, list[int]]] = None,
         renormalize_logits: bool = False,
+
         unmasking_schedule: str = "linear",
+        num_beams: int = 1,
         classifier_fn: Optional[Callable] = None,
+
         classifier_scale: float = 0.0,
         classifier_schedule: str = "constant",
         min_classifier_scale: float = 0.0,
@@ -318,16 +321,18 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         if negative_prompt_ids is not None:
             unconditional_input_ids = negative_prompt_ids
 
-        if num_return_sequences > 1:
-            input_ids = input_ids.repeat_interleave(num_return_sequences, dim=0)
+        original_batch_size = input_ids.size(0)
+        batch_multiplier = num_beams if num_beams > 1 else num_return_sequences
+
+        if batch_multiplier > 1:
+            input_ids = input_ids.repeat_interleave(batch_multiplier, dim=0)
             if attention_mask is not None:
-                attention_mask = attention_mask.repeat_interleave(num_return_sequences, dim=0)
+                attention_mask = attention_mask.repeat_interleave(batch_multiplier, dim=0)
             if unconditional_input_ids is not None:
-                unconditional_input_ids = unconditional_input_ids.repeat_interleave(num_return_sequences, dim=0)
-            # negative_prompt_ids is already assigned to unconditional_input_ids if present.
-            # but we also update it just in case it's used elsewhere
+                unconditional_input_ids = unconditional_input_ids.repeat_interleave(batch_multiplier, dim=0)
             if negative_prompt_ids is not None:
-                negative_prompt_ids = negative_prompt_ids.repeat_interleave(num_return_sequences, dim=0)
+                negative_prompt_ids = negative_prompt_ids.repeat_interleave(batch_multiplier, dim=0)
+        batch_size = input_ids.size(0)
 
         steps = steps or self.config.diffusion_steps
         block_length = block_length or self.config.block_size
@@ -338,7 +343,6 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
             raise ValueError("mask_token_id must be set in the configuration for generation.")
 
         T = input_ids.size(-1)
-        batch_size = input_ids.size(0)
         device, dtype = input_ids.device, input_ids.dtype
 
         if max_length is not None and max_new_tokens is None:
@@ -365,6 +369,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         x = torch.full((batch_size, T + max_new_tokens), mask_id, dtype=dtype, device=device)
         x[:, :T] = input_ids
+
+        if num_beams > 1:
+            beam_scores = torch.zeros((original_batch_size, num_beams), dtype=torch.float, device=device)
+            beam_scores[:, 1:] = -1e9
+            beam_scores = beam_scores.view(-1)
 
         if forced_decoder_ids is not None:
             for forced_id in forced_decoder_ids:
@@ -1149,13 +1158,65 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 x0 = torch.where(mask_index, x0, x)
                 confidence = torch.where(mask_index, x0_p, -torch.tensor(np.inf, device=device))
 
-                transfer_index = torch.zeros_like(x0, dtype=torch.bool, device=device)
-                for j in range(confidence.shape[0]):
-                    if num_transfer_tokens[j, i] > 0:
-                        _, select_index = torch.topk(confidence[j], k=num_transfer_tokens[j, i])
-                        transfer_index[j, select_index] = True
+                if num_beams > 1:
+                    next_beam_scores = torch.full((original_batch_size, num_beams * num_beams), -1e9, device=device)
+                    next_beam_tokens = torch.zeros((original_batch_size, num_beams * num_beams, x.size(1)), dtype=x.dtype, device=device)
 
-                x[transfer_index] = x0[transfer_index].to(x.dtype)
+                    log_probs = F.log_softmax(logits, dim=-1)
+
+                    for b_orig in range(original_batch_size):
+                        for b_beam in range(num_beams):
+                            b = b_orig * num_beams + b_beam
+                            M = num_transfer_tokens[b, i].item()
+
+                            if M > 0:
+                                _, select_index = torch.topk(confidence[b], k=M)
+                                branch_pos = select_index[-1]
+
+                                greedy_score = 0.0
+                                candidate_x = x[b].clone()
+                                for pos in select_index[:-1]:
+                                    tok = x0[b, pos]
+                                    candidate_x[pos] = tok
+                                    greedy_score += log_probs[b, pos, tok].item()
+
+                                top_v, top_i = torch.topk(log_probs[b, branch_pos], k=num_beams)
+
+                                for j in range(num_beams):
+                                    cand_score = beam_scores[b].item() + greedy_score + top_v[j].item()
+                                    cand_x = candidate_x.clone()
+                                    cand_x[branch_pos] = top_i[j]
+
+                                    idx = b_beam * num_beams + j
+                                    next_beam_scores[b_orig, idx] = cand_score
+                                    next_beam_tokens[b_orig, idx] = cand_x
+                            else:
+                                for j in range(num_beams):
+                                    idx = b_beam * num_beams + j
+                                    if j == 0:
+                                        next_beam_scores[b_orig, idx] = beam_scores[b].item()
+                                        next_beam_tokens[b_orig, idx] = x[b].clone()
+                                    else:
+                                        next_beam_scores[b_orig, idx] = -1e9
+                                        next_beam_tokens[b_orig, idx] = x[b].clone()
+
+                    top_scores, top_indices = torch.topk(next_beam_scores, k=num_beams, dim=-1)
+
+                    for b_orig in range(original_batch_size):
+                        for b_beam in range(num_beams):
+                            b = b_orig * num_beams + b_beam
+                            idx = top_indices[b_orig, b_beam]
+                            beam_scores[b] = top_scores[b_orig, b_beam]
+                            x[b] = next_beam_tokens[b_orig, idx]
+
+                else:
+                    transfer_index = torch.zeros_like(x0, dtype=torch.bool, device=device)
+                    for j in range(confidence.shape[0]):
+                        if num_transfer_tokens[j, i] > 0:
+                            _, select_index = torch.topk(confidence[j], k=num_transfer_tokens[j, i])
+                            transfer_index[j, select_index] = True
+
+                    x[transfer_index] = x0[transfer_index].to(x.dtype)
 
             if stopping_criteria is not None and stopping_criteria(x, logits):
                 break
@@ -1178,8 +1239,18 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         x = x[:, :block_end]
                         break
 
+        if num_beams > 1 and num_return_sequences <= num_beams:
+            final_x = []
+            for b_orig in range(original_batch_size):
+                for b_return in range(num_return_sequences):
+                    b = b_orig * num_beams + b_return
+                    final_x.append(x[b])
+            x = torch.stack(final_x, dim=0)
+
         # Process padding if eos_token_id and pad_token_id are provided
         if eos_token_id is not None and pad_token_id is not None:
+            # batch_size may have changed if we filtered beams
+            batch_size = x.size(0)
             for b in range(batch_size):
                 # Find first eos_token_id after the prompt
                 if isinstance(eos_token_id, list):
