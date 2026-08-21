@@ -1271,6 +1271,138 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         return x
 
+import uuid
+from dataclasses import dataclass, field
+from typing import List, Dict, Any, Optional
+
+@dataclass
+class MDLMRequest:
+    input_ids: torch.Tensor
+    max_new_tokens: int
+    total_steps: int
+    unmasking_schedule: str = "linear"
+    temperature: float = 0.0
+    request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    current_step: int = 0
+    x: Optional[torch.Tensor] = None
+    mask_index: Optional[torch.Tensor] = None
+    status: str = "pending"
+    result: Optional[torch.Tensor] = None
+    transfer_tokens: Optional[torch.Tensor] = None
+
+class MDLMContinuousBatchingManager:
+    """
+    Manager for in-flight (continuous) batching with Masked Diffusion Language Models.
+    Allows processing requests of different lengths and different diffusion step counts simultaneously.
+    """
+    def __init__(self, model: DiffusionModelForConditionalGeneration, max_batch_size: int = 8):
+        self.model = model
+        self.max_batch_size = max_batch_size
+        self.pending_requests: List[MDLMRequest] = []
+        self.active_requests: List[MDLMRequest] = []
+        self.completed_requests: List[MDLMRequest] = []
+
+    def add_request(self, input_ids: torch.Tensor, max_new_tokens: int, total_steps: int, **kwargs) -> str:
+        req = MDLMRequest(input_ids=input_ids, max_new_tokens=max_new_tokens, total_steps=total_steps, **kwargs)
+        self.pending_requests.append(req)
+        return req.request_id
+
+    @torch.no_grad()
+    def step(self):
+        # 1. Promote pending to active
+        while len(self.active_requests) < self.max_batch_size and self.pending_requests:
+            req = self.pending_requests.pop(0)
+            device = req.input_ids.device
+            mask_id = self.model.config.mask_token_id
+
+            prompt_len = req.input_ids.size(1)
+            x = torch.full((1, prompt_len + req.max_new_tokens), mask_id, dtype=req.input_ids.dtype, device=device)
+            x[0, :prompt_len] = req.input_ids[0]
+
+            req.x = x
+            req.mask_index = (x == mask_id)
+            req.transfer_tokens = get_num_transfer_tokens(req.mask_index, req.total_steps, schedule=req.unmasking_schedule)
+            req.status = "active"
+            self.active_requests.append(req)
+
+        if not self.active_requests:
+            return False
+
+        # 2. Pad active requests to form a batch
+        max_len = max(req.x.size(1) for req in self.active_requests)
+        batch_x = []
+        batch_attention_mask = []
+
+        mask_id = self.model.config.mask_token_id
+
+        for req in self.active_requests:
+            pad_len = max_len - req.x.size(1)
+            if pad_len > 0:
+                padded_x = F.pad(req.x, (0, pad_len), value=mask_id)
+                attn_mask = torch.cat([torch.ones(req.x.size(1), device=req.x.device), torch.zeros(pad_len, device=req.x.device)])
+            else:
+                padded_x = req.x
+                attn_mask = torch.ones(req.x.size(1), device=req.x.device)
+            batch_x.append(padded_x[0])
+            batch_attention_mask.append(attn_mask)
+
+        batch_x = torch.stack(batch_x)
+        batch_attention_mask = torch.stack(batch_attention_mask)
+
+        # 3. Compute timesteps
+        t_ratios = []
+        for req in self.active_requests:
+            t_ratio = req.mask_index.sum().float() / req.x.size(1)
+            t_ratios.append(t_ratio)
+        t_ratios = torch.tensor(t_ratios, device=batch_x.device)
+        current_timesteps = (t_ratios * self.model.config.max_timesteps).long().clamp(min=1, max=self.model.config.max_timesteps)
+
+        # 4. Forward pass
+        outputs = self.model(
+            input_ids=batch_x,
+            attention_mask=batch_attention_mask,
+            timesteps=current_timesteps
+        )
+        logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+
+        # 5. Iterative unmasking per request
+        finished_reqs = []
+        for i, req in enumerate(self.active_requests):
+            req_len = req.x.size(1)
+            req_logits = logits[i:i+1, :req_len, :]
+
+            M = req.transfer_tokens[0, req.current_step].item()
+
+            if req.temperature > 0:
+                req_logits = req_logits / req.temperature
+
+            x0 = torch.argmax(req_logits, dim=-1)
+
+            p = F.softmax(req_logits.to(torch.float64), dim=-1)
+            x0_p = torch.squeeze(torch.gather(p, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
+
+            confidence = torch.where(req.x == mask_id, x0_p, -torch.tensor(float('inf'), device=req.x.device))
+
+            if M > 0:
+                _, select_index = torch.topk(confidence[0], k=M)
+                req.x[0, select_index] = x0[0, select_index].to(req.x.dtype)
+                req.mask_index[0, select_index] = False
+
+            req.current_step += 1
+
+            if req.current_step >= req.total_steps:
+                req.status = "completed"
+                req.result = req.x
+                finished_reqs.append(req)
+
+        # 6. Remove finished
+        for req in finished_reqs:
+            self.active_requests.remove(req)
+            self.completed_requests.append(req)
+
+        return True
+
+
 UniversalDiffusionLM = DiffusionModelForConditionalGeneration
 UniversalDiffusionLM.register_for_auto_class("AutoModelForCausalLM")
 UniversalDiffusionLM.register_for_auto_class("AutoModel")
