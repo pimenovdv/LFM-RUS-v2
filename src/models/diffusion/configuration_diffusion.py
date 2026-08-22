@@ -13,6 +13,7 @@ class DiffusionConfig(PretrainedConfig):
         block_size=64,
         timestep_dim=256,
         max_timesteps=1000,
+        use_sdpa=True,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -23,5 +24,6 @@ class DiffusionConfig(PretrainedConfig):
         self.block_size = block_size
         self.timestep_dim = timestep_dim
         self.max_timesteps = max_timesteps
+        self.use_sdpa = use_sdpa
 
 DiffusionConfig.register_for_auto_class("AutoConfig")
