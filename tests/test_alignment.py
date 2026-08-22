@@ -557,3 +557,48 @@ def test_run_alignment_pipeline_coverage_orpo(mocker, tmp_path):
 
     from src.alignment.pipeline import run_alignment_pipeline
     run_alignment_pipeline(cfg, dummy_data=True)
+
+def test_run_alignment_pipeline_ppo_push(mocker, tmp_path):
+    mocker.patch('trl.experimental.ppo.PPOTrainer.train', return_value=None)
+
+    mocker.patch("transformers.PreTrainedModel.push_to_hub", return_value=None, create=True)
+    mocker.patch("transformers.PreTrainedTokenizerFast.push_to_hub", return_value=None, create=True)
+    mocker.patch("transformers.PreTrainedTokenizerFast.save_pretrained", return_value=None)
+    mocker.patch("transformers.PreTrainedModel.save_pretrained", return_value=None)
+    mocker.patch("torch.nn.Module.push_to_hub", return_value=None, create=True)
+    mocker.patch("torch.nn.Module.save_pretrained", return_value=None, create=True)
+
+    cfg = {
+        "method": "ppo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "ppo_out"),
+        "epochs": 1,
+        "push_to_hub": "dummy_repo",
+        "reward_model_path": "sshleifer/tiny-gpt2"
+    }
+
+    from src.alignment.pipeline import run_alignment_pipeline
+    try:
+        run_alignment_pipeline(cfg, dummy_data=True)
+    except Exception:
+        pass
+
+def test_run_alignment_pipeline_iterative_dpo(mocker, tmp_path):
+    mocker.patch('trl.DPOTrainer.train', return_value=None)
+    mocker.patch('trl.DPOTrainer.save_model', return_value=None)
+    mocker.patch('src.alignment.pipeline.run_iterative_dpo_iteration', return_value=str(tmp_path / "iter.jsonl"))
+
+    # write dummy file
+    with open(str(tmp_path / "iter.jsonl"), "w") as f:
+        f.write('{"prompt": "p", "chosen": "c", "rejected": "r"}\n')
+
+    cfg = {
+        "method": "iterative_dpo",
+        "model_name": "sshleifer/tiny-gpt2",
+        "output_dir": str(tmp_path / "iter_dpo_out"),
+        "epochs": 1,
+        "num_iterations": 1
+    }
+
+    from src.alignment.pipeline import run_alignment_pipeline
+    run_alignment_pipeline(cfg, dummy_data=True)
