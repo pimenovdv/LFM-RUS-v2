@@ -2107,3 +2107,60 @@ def test_temperature_mask(mocker):
 
         # It should run successfully without errors
         assert outputs.shape == (1, 2)
+
+def test_unmasking_schedule_entropy(mocker):
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, DiffusionConfig
+    import torch
+
+    config = DiffusionConfig(vocab_size=100, mask_token_id=0, max_timesteps=10)
+    config.base_config_dict = {"vocab_size": 100, "model_type": "gpt2"}
+
+    model = DiffusionModelForConditionalGeneration(config)
+
+    # Mock forward to return logits (1, 10, 100)
+    def mock_forward(*args, **kwargs):
+        class Output:
+            logits = torch.randn(1, 10, 100)
+        return Output()
+
+    mocker.patch.object(model, "__call__", side_effect=mock_forward)
+
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    # generate should not crash and should return something
+    output = model.generate(
+        input_ids=input_ids,
+        max_new_tokens=7,
+        steps=5,
+        unmasking_schedule="entropy"
+    )
+
+    assert output.shape == (1, 10)
+
+def test_continuous_batching_entropy(mocker):
+    from src.models.diffusion.modeling_diffusion import MDLMContinuousBatchingManager, DiffusionModelForConditionalGeneration, DiffusionConfig
+    import torch
+
+    config = DiffusionConfig(vocab_size=100, mask_token_id=0, max_timesteps=10)
+    config.base_config_dict = {"vocab_size": 100, "model_type": "gpt2"}
+
+    model = DiffusionModelForConditionalGeneration(config)
+    manager = MDLMContinuousBatchingManager(model, max_batch_size=2)
+
+    def mock_forward(*args, **kwargs):
+        class Output:
+            logits = torch.randn(2, 10, 100)
+        return Output()
+
+    mocker.patch.object(model, "__call__", side_effect=mock_forward)
+
+    manager.add_request(torch.tensor([[1, 2, 3]]), max_new_tokens=7, total_steps=2, unmasking_schedule="entropy")
+    manager.add_request(torch.tensor([[4, 5, 6]]), max_new_tokens=7, total_steps=3, unmasking_schedule="entropy")
+
+    has_active = True
+    steps_run = 0
+    while has_active and steps_run < 5:
+        has_active = manager.step()
+        steps_run += 1
+
+    assert len(manager.completed_requests) == 2
