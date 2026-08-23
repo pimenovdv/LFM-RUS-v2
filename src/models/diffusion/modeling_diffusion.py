@@ -1160,6 +1160,25 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 x0 = torch.where(mask_index, x0, x)
                 confidence = torch.where(mask_index, x0_p, -torch.tensor(np.inf, device=device))
 
+                if unmasking_schedule == "entropy":
+                    p_ent = F.softmax(logits.to(torch.float64), dim=-1)
+                    ent_val = -torch.sum(p_ent * torch.log(p_ent + 1e-9), dim=-1)
+                    max_ent = math.log(logits.size(-1)) if logits.size(-1) > 1 else 1.0
+                    for b_idx in range(x.shape[0]):
+                        curr_masks = mask_index[b_idx].sum().item()
+                        remaining_steps = steps_per_block - i
+                        if remaining_steps <= 1:
+                            num_transfer_tokens[b_idx, i] = curr_masks
+                        elif curr_masks == 0:
+                            num_transfer_tokens[b_idx, i] = 0
+                        else:
+                            mean_ent = ent_val[b_idx][mask_index[b_idx]].mean().item()
+                            norm_ent = mean_ent / max_ent
+                            confidence_score = 1.0 - norm_ent
+                            target_tokens = max(1, int(curr_masks * confidence_score))
+                            linear_tokens = max(1, curr_masks // remaining_steps)
+                            num_transfer_tokens[b_idx, i] = int((target_tokens + linear_tokens) / 2)
+
                 if num_beams > 1:
                     next_beam_scores = torch.full((original_batch_size, num_beams * num_beams), -1e9, device=device)
                     next_beam_tokens = torch.zeros((original_batch_size, num_beams * num_beams, x.size(1)), dtype=x.dtype, device=device)
@@ -1384,6 +1403,25 @@ class MDLMContinuousBatchingManager:
             x0_p = torch.squeeze(torch.gather(p, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
 
             confidence = torch.where(req.x == mask_id, x0_p, -torch.tensor(float('inf'), device=req.x.device))
+
+            if req.unmasking_schedule == "entropy":
+                curr_masks = req.mask_index[0].sum().item()
+                remaining_steps = req.total_steps - req.current_step
+                if remaining_steps <= 1:
+                    req.transfer_tokens[0, req.current_step] = curr_masks
+                elif curr_masks == 0:
+                    req.transfer_tokens[0, req.current_step] = 0
+                else:
+                    p_ent = F.softmax(req_logits.to(torch.float64), dim=-1)
+                    ent_val = -torch.sum(p_ent * torch.log(p_ent + 1e-9), dim=-1)
+                    max_ent = math.log(req_logits.size(-1)) if req_logits.size(-1) > 1 else 1.0
+                    mean_ent = ent_val[0][req.mask_index[0]].mean().item()
+                    norm_ent = mean_ent / max_ent
+                    confidence_score = 1.0 - norm_ent
+                    target_tokens = max(1, int(curr_masks * confidence_score))
+                    linear_tokens = max(1, curr_masks // remaining_steps)
+                    req.transfer_tokens[0, req.current_step] = int((target_tokens + linear_tokens) / 2)
+                M = req.transfer_tokens[0, req.current_step].item()
 
             if M > 0:
                 _, select_index = torch.topk(confidence[0], k=M)
