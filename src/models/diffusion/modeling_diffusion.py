@@ -313,6 +313,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         logits_processor: Optional[LogitsProcessorList] = None,
         stopping_criteria: Optional[StoppingCriteriaList] = None,
         watermarking_config: Optional[Union[dict, 'WatermarkingConfig']] = None,
+        draft_model: Optional["PreTrainedModel"] = None,
+        speculative_steps: int = 1,
+        speculative_threshold: float = 0.5,
         **kwargs
     ):
         """
@@ -417,6 +420,40 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 t_ratio = mask_index.sum(dim=1).float() / (T + max_new_tokens)
                 current_timesteps = (t_ratio * self.config.max_timesteps).long().clamp(min=1, max=self.config.max_timesteps)
 
+                draft_mask_index = None
+                spec_tokens = None
+                if draft_model is not None:
+                    # Run draft model to get candidate tokens
+                    draft_outputs = draft_model(
+                        input_ids=x,
+                        attention_mask=attention_mask,
+                        timesteps=current_timesteps,
+                        steering_vector=steering_vector,
+                        steering_layer_name=steering_layer_name,
+                        steering_scale=steering_scale
+                    )
+                    draft_logits = draft_outputs.logits if hasattr(draft_outputs, "logits") else draft_outputs[0]
+
+                    # Unmask speculative_steps * N tokens using draft_model
+                    draft_probs = torch.nn.functional.softmax(draft_logits.to(torch.float64), dim=-1)
+                    draft_confidence = -(-torch.sum(draft_probs * torch.log(draft_probs + 1e-9), dim=-1))
+
+                    draft_x0 = torch.argmax(draft_logits, dim=-1)
+                    if hasattr(self, 'tokenizer') and self.tokenizer is not None:
+                        draft_x0 = filter_special_tokens(draft_x0, self.tokenizer, mask_id)
+
+                    draft_confidence = torch.where(mask_index, draft_confidence, -torch.tensor(float('inf'), device=device, dtype=torch.float64))
+
+                    draft_mask_index = mask_index.clone()
+                    spec_tokens = torch.zeros_like(x, dtype=torch.bool, device=device)
+
+                    for j in range(x.shape[0]):
+                        M_draft = min(num_transfer_tokens[j, i].item() * speculative_steps, mask_index[j].sum().item())
+                        if M_draft > 0:
+                            _, draft_select_index = torch.topk(draft_confidence[j], k=M_draft)
+                            spec_tokens[j, draft_select_index] = True
+                            x[j, draft_select_index] = draft_x0[j, draft_select_index].to(x.dtype)
+
                 outputs = self(
                     input_ids=x,
                     attention_mask=attention_mask,
@@ -426,6 +463,32 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     steering_scale=steering_scale
                 )
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+
+                if draft_model is not None:
+                    # Verification step
+                    target_probs = torch.nn.functional.softmax(logits.to(torch.float64), dim=-1)
+                    target_x0 = torch.argmax(logits, dim=-1)
+
+                    for j in range(x.shape[0]):
+                        for pos in range(x.shape[1]):
+                            if spec_tokens[j, pos]:
+                                token_draft = x[j, pos]
+                                prob_target = target_probs[j, pos, token_draft].item()
+
+                                if prob_target >= speculative_threshold or token_draft == target_x0[j, pos]:
+                                    # Accept
+                                    pass
+                                else:
+                                    # Reject, revert to target model prediction or mask
+                                    x[j, pos] = target_x0[j, pos].to(x.dtype)
+                                    # Effectively, we treat it as if target model predicted it this step,
+                                    # or we can mask it back if we want strictly iterative:
+                                    # x[j, pos] = mask_id
+
+                    # We continue with normal generation steps (logits modification, etc)
+                    # But since we already modified x, we might need to adjust mask_index
+                    mask_index = (x == mask_id)
+
 
                 if watermarking_config is not None and WatermarkLogitsProcessor is not None:
                     if watermark_processor is None:
