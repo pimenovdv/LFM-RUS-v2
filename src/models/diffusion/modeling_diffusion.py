@@ -6,6 +6,7 @@ from typing import Optional, Union, Callable
 import numpy as np
 import time
 import math
+from typing import List, Dict, Any
 
 try:
     from transformers import WatermarkingConfig, WatermarkLogitsProcessor
@@ -1354,6 +1355,29 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
             }
 
         return x
+
+    def generate_dynamic_batch(self, requests_configs: List[Dict[str, Any]], max_batch_size: int = 8) -> List[torch.Tensor]:
+        """
+        Processes a list of generation requests simultaneously using dynamic continuous batching.
+        Each request configuration must contain at least 'input_ids' and 'max_new_tokens'.
+        """
+        manager = MDLMContinuousBatchingManager(self, max_batch_size=max_batch_size)
+
+        request_ids = []
+        for config in requests_configs:
+            req_id = manager.add_request(**config)
+            request_ids.append(req_id)
+
+        while manager.active_requests or manager.pending_requests:
+            manager.step()
+
+        # Return results in the original order
+        results = []
+        completed_map = {req.request_id: req.result for req in manager.completed_requests}
+        for req_id in request_ids:
+            results.append(completed_map[req_id])
+
+        return results
 
 import uuid
 from dataclasses import dataclass, field
