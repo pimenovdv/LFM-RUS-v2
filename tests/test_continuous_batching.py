@@ -100,3 +100,19 @@ def test_step_processing(mock_diffusion_model):
     # Step 4
     has_active = manager.step()
     assert has_active is False # Nothing left
+
+def test_generate_dynamic_batch(mock_diffusion_model):
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 3, "total_steps": 2},
+        {"input_ids": torch.tensor([[1, 2, 3]]), "max_new_tokens": 2, "total_steps": 3},
+        {"input_ids": torch.tensor([[1]]), "max_new_tokens": 1, "total_steps": 1},
+    ]
+
+    # Use the real generate_dynamic_batch method bound to the mock object
+    results = DiffusionModelForConditionalGeneration.generate_dynamic_batch(mock_diffusion_model, requests_configs=requests, max_batch_size=2)
+
+    assert len(results) == 3
+    # Check shape of results: prompt_len + max_new_tokens
+    assert results[0].shape == (1, 5) # 2 + 3
+    assert results[1].shape == (1, 5) # 3 + 2
+    assert results[2].shape == (1, 2) # 1 + 1
