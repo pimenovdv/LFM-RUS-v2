@@ -2164,3 +2164,22 @@ def test_continuous_batching_entropy(mocker):
         steps_run += 1
 
     assert len(manager.completed_requests) == 2
+def test_generate_use_kv_cache_raises_error(mocker):
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    import pytest
+    import torch
+
+    config = DiffusionConfig(mask_token_id=0, diffusion_steps=2, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.eval()
+
+    input_ids = torch.tensor([[1, 2]])
+
+    with pytest.raises(NotImplementedError, match="KV-caching is currently not supported for Masked Diffusion Models"):
+        model.generate(input_ids, max_new_tokens=4, steps=4, use_kv_cache=True)

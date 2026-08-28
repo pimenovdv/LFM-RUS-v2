@@ -300,6 +300,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         forced_decoder_ids: Optional[list[list[int]]] = None,
         forced_eos_token_id: Optional[Union[int, list[int]]] = None,
         renormalize_logits: bool = False,
+        use_kv_cache: bool = False,
 
         unmasking_schedule: str = "linear",
         num_beams: int = 1,
@@ -322,6 +323,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         """
         Iterative unmasking generation for Diffusion Models.
         """
+        if use_kv_cache:
+            raise NotImplementedError(
+                "KV-caching is currently not supported for Masked Diffusion Models. "
+                "The architecture relies on dynamic timestep conditioning and bidirectional attention "
+                "(where prefix tokens attend to masked suffix tokens), making standard autoregressive KV-caching mathematically incompatible."
+            )
+
         start_time = time.time() if max_time is not None else None
 
         if negative_prompt_ids is not None:
