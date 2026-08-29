@@ -144,3 +144,34 @@ def test_run_sft_diffusion(mocker):
     args, kwargs = mock_trainer.call_args
     assert "data_collator" in kwargs
     assert isinstance(kwargs["data_collator"], SFTDiffusionDataCollator)
+
+def test_run_sft_lora(mocker):
+    mock_tokenizer = mocker.patch("src.sft.AutoTokenizer.from_pretrained")
+    mock_model = mocker.patch("src.sft.AutoModelForCausalLM.from_pretrained")
+    mock_trainer = mocker.patch("src.sft.SFTTrainer")
+    mocker.patch("src.sft.SFTConfig")
+    mock_get_peft = mocker.patch("peft.get_peft_model")
+    mock_lora_config = mocker.patch("peft.LoraConfig")
+
+    mock_tok_inst = MagicMock()
+    mock_tok_inst.pad_token_id = 0
+    mock_tokenizer.return_value = mock_tok_inst
+
+    mock_mod_inst = MagicMock()
+    mock_model.return_value = mock_mod_inst
+    mock_get_peft.return_value = mock_mod_inst
+
+    cfg = {
+        "model_name": "dummy_model",
+        "use_lora": True,
+        "lora": {
+            "r": 16,
+            "target_modules": ["q_proj", "v_proj"]
+        }
+    }
+
+    run_sft(cfg, dummy_data=True)
+
+    mock_lora_config.assert_called_once()
+    mock_get_peft.assert_called_once_with(mock_mod_inst, mock_lora_config.return_value)
+    mock_trainer.assert_called_once()
