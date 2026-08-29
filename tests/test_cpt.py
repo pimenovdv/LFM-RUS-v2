@@ -299,3 +299,35 @@ def test_merge_top_k_checkpoints_no_checkpoints(tmp_path, caplog):
     from src.cpt import merge_top_k_checkpoints
     merge_top_k_checkpoints(str(tmp_path), 2)
     assert "No checkpoints found to merge." in caplog.text
+
+def test_run_cpt_lora(mocker):
+    mock_tokenizer = mocker.patch("src.cpt.AutoTokenizer.from_pretrained")
+    mock_model = mocker.patch("src.cpt.AutoModelForCausalLM.from_pretrained")
+    mock_trainer = mocker.patch("src.cpt.Trainer")
+    mocker.patch("src.cpt.TrainingArguments")
+    mocker.patch("src.cpt.DataCollatorForLanguageModeling")
+    mock_get_peft = mocker.patch("peft.get_peft_model")
+    mock_lora_config = mocker.patch("peft.LoraConfig")
+
+    mock_tokenizer.return_value.pad_token = None
+    mock_tokenizer.return_value.eos_token = "<|endoftext|>"
+    mock_tokenizer.return_value.return_value = {"input_ids": [[1, 2, 3]] * 400}
+
+    mock_mod_inst = MagicMock()
+    mock_model.return_value = mock_mod_inst
+    mock_get_peft.return_value = mock_mod_inst
+
+    cfg = {
+        "model_name": "dummy_model",
+        "use_lora": True,
+        "lora": {
+            "r": 16,
+            "target_modules": ["q_proj", "v_proj"]
+        }
+    }
+
+    run_cpt(cfg, dummy_data=True)
+
+    mock_lora_config.assert_called_once()
+    mock_get_peft.assert_called_once_with(mock_mod_inst, mock_lora_config.return_value)
+    mock_trainer.assert_called_once()

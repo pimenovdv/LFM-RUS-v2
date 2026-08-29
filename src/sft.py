@@ -163,9 +163,25 @@ def run_sft(cfg, dummy_data):
             ds = interleave_datasets(datasets, probabilities=probabilities, stopping_strategy="all_exhausted")
 
 
+    use_lora = cfg.get("use_lora", False)
+
     model = AutoModelForCausalLM.from_pretrained(model_name)
 
     is_diffusion = isinstance(model, DiffusionModelForConditionalGeneration) or getattr(model.config, "model_type", "") == "lfm_masked_diffusion"
+
+    if use_lora:
+        from peft import LoraConfig, get_peft_model
+        print("Applying LoRA to the model...")
+        lora_cfg = cfg.get("lora", {})
+        peft_config = LoraConfig(
+            r=lora_cfg.get("r", 8),
+            lora_alpha=lora_cfg.get("lora_alpha", 32),
+            target_modules=lora_cfg.get("target_modules", ["c_attn"]),
+            lora_dropout=lora_cfg.get("lora_dropout", 0.1),
+            bias=lora_cfg.get("bias", "none"),
+            task_type=lora_cfg.get("task_type", "CAUSAL_LM"),
+        )
+        model = get_peft_model(model, peft_config)
 
     if is_diffusion:
         packing = False

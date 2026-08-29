@@ -159,9 +159,25 @@ def run_cpt(cfg, dummy_data):
 
     lm_datasets = tokenized_datasets.map(group_texts, batched=True)
 
+    use_lora = cfg.get("use_lora", False)
+
     # Initialize Model
     print(f"Initializing model {model_name}...")
     model = AutoModelForCausalLM.from_pretrained(model_name)
+
+    if use_lora:
+        from peft import LoraConfig, get_peft_model
+        print("Applying LoRA to the model...")
+        lora_cfg = cfg.get("lora", {})
+        peft_config = LoraConfig(
+            r=lora_cfg.get("r", 8),
+            lora_alpha=lora_cfg.get("lora_alpha", 32),
+            target_modules=lora_cfg.get("target_modules", ["c_attn"]),
+            lora_dropout=lora_cfg.get("lora_dropout", 0.1),
+            bias=lora_cfg.get("bias", "none"),
+            task_type=lora_cfg.get("task_type", "CAUSAL_LM"),
+        )
+        model = get_peft_model(model, peft_config)
 
     # WSD configuration
     wsd_cfg = cfg.get("wsd", {})
