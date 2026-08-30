@@ -61,6 +61,82 @@ def filter_special_tokens(tokens, tokenizer, mask_id):
     tokens = torch.where(mask, torch.tensor(mask_id, device=tokens.device, dtype=tokens.dtype), tokens)
     return tokens
 
+class DiffusionControlNetModel(PreTrainedModel):
+    """
+    ControlNet-like conditioning model for Diffusion Language Models.
+    Processes external condition signals and outputs hidden states to be injected into the main model.
+    """
+    config_class = DiffusionConfig
+
+    def __init__(self, config: DiffusionConfig):
+        super().__init__(config)
+
+        base_config = AutoConfig.for_model(**config.base_config_dict)
+        if getattr(config, "use_sdpa", False):
+            base_config._attn_implementation = "sdpa"
+
+        # We need the inner model to process conditions and output hidden states
+        base_config.output_hidden_states = True
+        self.inner_model = AutoModel.from_config(base_config)
+        self._disable_causal_mask()
+
+        self.timestep_embedder = nn.Sequential(
+            nn.Linear(1, config.timestep_dim),
+            nn.SiLU(),
+            nn.Linear(config.timestep_dim, base_config.hidden_size)
+        )
+
+        # Zero-initialized linear projections for injecting control states
+        self.zero_projections = nn.ModuleList([
+            nn.Linear(base_config.hidden_size, base_config.hidden_size)
+            for _ in range(base_config.num_hidden_layers)
+        ])
+
+        # Initialize zero projections with exact zeros
+        for proj in self.zero_projections:
+            nn.init.zeros_(proj.weight)
+            nn.init.zeros_(proj.bias)
+
+    def _disable_causal_mask(self):
+        if hasattr(self.inner_model, "config"):
+            self.inner_model.config.is_causal = False
+        if hasattr(self.inner_model, "_update_causal_mask"):
+            self.inner_model._update_causal_mask = lambda *args, **kwargs: args[1] if len(args) > 1 else kwargs.get("attention_mask")
+
+    def forward(self, input_ids=None, timesteps=None, attention_mask=None, inputs_embeds=None, **kwargs):
+        if inputs_embeds is None:
+            if input_ids is None:
+                raise ValueError("You have to specify either input_ids or inputs_embeds")
+            embeddings_layer = self.inner_model.get_input_embeddings()
+            inputs_embeds = embeddings_layer(input_ids)
+
+        if timesteps is not None:
+            t_embed = self.timestep_embedder(timesteps.unsqueeze(-1).float())
+            hidden_states = inputs_embeds + t_embed.unsqueeze(1)
+        else:
+            hidden_states = inputs_embeds
+
+        inner_kwargs = kwargs.copy()
+        if 'return_dict' in inner_kwargs:
+            del inner_kwargs['return_dict']
+
+        outputs = self.inner_model(
+            inputs_embeds=hidden_states,
+            attention_mask=attention_mask,
+            output_hidden_states=True,
+            return_dict=True,
+            **inner_kwargs
+        )
+
+        hidden_states_list = outputs.hidden_states[1:] # Skip embedding layer output
+
+        control_states = []
+        for i, (state, proj) in enumerate(zip(hidden_states_list, self.zero_projections)):
+            control_states.append(proj(state))
+
+        return control_states
+
+
 class DiffusionModelForConditionalGeneration(PreTrainedModel):
     config_class = DiffusionConfig
 
@@ -140,7 +216,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
     def set_input_embeddings(self, value):
         self.inner_model.set_input_embeddings(value)
 
-    def forward(self, input_ids=None, timesteps=None, attention_mask=None, inputs_embeds=None, labels=None, steering_vector=None, steering_layer_name=None, steering_scale=1.0, **kwargs):
+    def forward(self, input_ids=None, timesteps=None, attention_mask=None, inputs_embeds=None, labels=None, steering_vector=None, steering_layer_name=None, steering_scale=1.0, control_states=None, control_scale=1.0, **kwargs):
         if inputs_embeds is None:
             if input_ids is None:
                 raise ValueError("You have to specify either input_ids or inputs_embeds")
@@ -164,6 +240,28 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     return output + steer
                 handle = target_layer.register_forward_hook(steer_hook)
 
+        control_handles = []
+        if control_states is not None:
+            # Find the transformer layers module list to inject control_states
+            layers = None
+            for name, module in self.inner_model.named_modules():
+                if isinstance(module, nn.ModuleList):
+                    if layers is None or len(module) > len(layers):
+                        layers = module
+
+            if layers is not None:
+                for i, layer in enumerate(layers):
+                    if i < len(control_states):
+                        def create_hook(idx):
+                            def control_hook(module, input, output):
+                                control_signal = control_scale * control_states[idx]
+                                if isinstance(output, tuple):
+                                    return tuple([output[0] + control_signal] + list(output[1:]))
+                                return output + control_signal
+                            return control_hook
+                        h = layer.register_forward_hook(create_hook(i))
+                        control_handles.append(h)
+
         try:
             inner_kwargs = kwargs.copy()
             if 'return_dict' in inner_kwargs:
@@ -177,6 +275,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         finally:
             if handle is not None:
                 handle.remove()
+            for h in control_handles:
+                h.remove()
 
         logits = self.lm_head(outputs.last_hidden_state)
 
@@ -295,6 +395,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         steering_vector: Optional[torch.Tensor] = None,
         steering_layer_name: Optional[str] = None,
         steering_scale: float = 1.0,
+        control_model: Optional[DiffusionControlNetModel] = None,
+        control_input_ids: Optional[torch.Tensor] = None,
+        control_inputs_embeds: Optional[torch.Tensor] = None,
+        control_scale: float = 1.0,
         eos_token_id: Optional[Union[int, list[int]]] = None,
         pad_token_id: Optional[int] = None,
         forced_decoder_ids: Optional[list[list[int]]] = None,
@@ -429,6 +533,17 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 t_ratio = mask_index.sum(dim=1).float() / (T + max_new_tokens)
                 current_timesteps = (t_ratio * self.config.max_timesteps).long().clamp(min=1, max=self.config.max_timesteps)
 
+                control_states = None
+                if control_model is not None:
+                    if control_input_ids is None and control_inputs_embeds is None:
+                        control_states = control_model(input_ids=x, timesteps=current_timesteps)
+                    else:
+                        control_states = control_model(
+                            input_ids=control_input_ids,
+                            inputs_embeds=control_inputs_embeds,
+                            timesteps=current_timesteps
+                        )
+
                 draft_mask_index = None
                 spec_tokens = None
                 if draft_model is not None:
@@ -439,7 +554,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         timesteps=current_timesteps,
                         steering_vector=steering_vector,
                         steering_layer_name=steering_layer_name,
-                        steering_scale=steering_scale
+                        steering_scale=steering_scale,
+                        control_states=control_states,
+                        control_scale=control_scale
                     )
                     draft_logits = draft_outputs.logits if hasattr(draft_outputs, "logits") else draft_outputs[0]
 
@@ -469,7 +586,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     timesteps=current_timesteps,
                     steering_vector=steering_vector,
                     steering_layer_name=steering_layer_name,
-                    steering_scale=steering_scale
+                    steering_scale=steering_scale,
+                    control_states=control_states,
+                    control_scale=control_scale
                 )
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
 
@@ -557,7 +676,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         timesteps=current_timesteps,
                         steering_vector=steering_vector,
                         steering_layer_name=steering_layer_name,
-                        steering_scale=steering_scale
+                        steering_scale=steering_scale,
+                        control_states=control_states,
+                        control_scale=control_scale
                     )
                     uncond_logits = uncond_outputs.logits if hasattr(uncond_outputs, "logits") else uncond_outputs[0]
 
