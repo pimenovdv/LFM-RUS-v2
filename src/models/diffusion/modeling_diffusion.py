@@ -61,6 +61,78 @@ def filter_special_tokens(tokens, tokenizer, mask_id):
     tokens = torch.where(mask, torch.tensor(mask_id, device=tokens.device, dtype=tokens.dtype), tokens)
     return tokens
 
+import copy
+
+class SparseMoEBlock(nn.Module):
+    """
+    Sparse Mixture of Experts (MoE) Block that replaces a standard MLP layer.
+    """
+    def __init__(self, hidden_size: int, num_experts: int, num_experts_per_tok: int, original_mlp: nn.Module):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.num_experts = num_experts
+        self.num_experts_per_tok = num_experts_per_tok
+
+        # Router to output logits over experts
+        self.router = nn.Linear(hidden_size, num_experts, bias=False)
+
+        # Create a list of experts by cloning the original MLP
+        self.experts = nn.ModuleList([copy.deepcopy(original_mlp) for _ in range(num_experts)])
+
+    def forward(self, hidden_states: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+        batch_size, sequence_length, hidden_dim = hidden_states.shape
+        # Flatten the spatial dimensions for routing
+        hidden_states_flat = hidden_states.view(-1, hidden_dim)
+
+        # Calculate routing logits and probabilities
+        router_logits = self.router(hidden_states_flat)
+        routing_weights = F.softmax(router_logits, dim=1)
+
+        # Select top-k experts
+        routing_weights, selected_experts = torch.topk(routing_weights, self.num_experts_per_tok, dim=-1)
+
+        # Normalize routing weights for the selected experts
+        routing_weights = routing_weights / routing_weights.sum(dim=-1, keepdim=True)
+        routing_weights = routing_weights.to(hidden_states.dtype)
+
+        # Initialize output tensor
+        final_hidden_states = torch.zeros_like(hidden_states_flat)
+
+        # Process tokens through selected experts
+        # Create mask for each expert
+        expert_mask = torch.nn.functional.one_hot(selected_experts, num_classes=self.num_experts).permute(2, 1, 0)
+
+        for expert_idx in range(self.num_experts):
+            expert_layer = self.experts[expert_idx]
+
+            # Find tokens routed to this expert
+            idx, top_x = torch.where(expert_mask[expert_idx])
+
+            if top_x.shape[0] == 0:
+                continue
+
+            # Gather tokens for the current expert
+            top_x_list = top_x.tolist()
+            idx_list = idx.tolist()
+
+            current_state = hidden_states_flat[top_x_list]
+
+            # Pass through expert
+            current_hidden_states = expert_layer(current_state, *args, **kwargs)
+
+            if isinstance(current_hidden_states, tuple):
+                current_hidden_states = current_hidden_states[0]
+
+            # Multiply by routing weight
+            current_hidden_states = current_hidden_states * routing_weights[top_x_list, idx_list].unsqueeze(-1)
+
+            # Accumulate results
+            final_hidden_states.index_add_(0, top_x, current_hidden_states)
+
+        # Reshape back to original shape
+        final_hidden_states = final_hidden_states.view(batch_size, sequence_length, hidden_dim)
+        return final_hidden_states
+
 class DiffusionControlNetModel(PreTrainedModel):
     """
     ControlNet-like conditioning model for Diffusion Language Models.
@@ -160,6 +232,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         if getattr(base_config, "tie_word_embeddings", False):
             self.lm_head.weight = self.inner_model.get_input_embeddings().weight
 
+        if getattr(config, "use_moe", False):
+            self._inject_moe(
+                hidden_size=base_config.hidden_size,
+                num_experts=getattr(config, "num_experts", 8),
+                num_experts_per_tok=getattr(config, "num_experts_per_tok", 2)
+            )
+
     def _disable_causal_mask(self):
         """
         Dynamic patching to disable causality.
@@ -180,6 +259,23 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 if hasattr(module, "bias") and isinstance(module.bias, torch.Tensor) and module.bias.dim() == 4:
                     module.bias.data.fill_(1)
 
+    def _inject_moe(self, hidden_size, num_experts, num_experts_per_tok):
+        """
+        Dynamically replaces standard MLP layers in the inner transformer with SparseMoEBlocks.
+        """
+        replaced_any = False
+        for name, module in dict(self.inner_model.named_modules()).items():
+            if hasattr(module, 'mlp') and isinstance(getattr(module, 'mlp'), nn.Module) and not isinstance(getattr(module, 'mlp'), SparseMoEBlock):
+                original_mlp = module.mlp
+                moe_block = SparseMoEBlock(
+                    hidden_size=hidden_size,
+                    num_experts=num_experts,
+                    num_experts_per_tok=num_experts_per_tok,
+                    original_mlp=original_mlp
+                )
+                setattr(module, 'mlp', moe_block)
+                replaced_any = True
+        return replaced_any
 
     def get_steering_vector(self, positive_input_ids, negative_input_ids, layer_name, attention_mask=None):
         captured_states = []

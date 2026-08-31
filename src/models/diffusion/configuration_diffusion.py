@@ -14,6 +14,9 @@ class DiffusionConfig(PretrainedConfig):
         timestep_dim=256,
         max_timesteps=1000,
         use_sdpa=True,
+        use_moe=False,
+        num_experts=8,
+        num_experts_per_tok=2,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -25,5 +28,8 @@ class DiffusionConfig(PretrainedConfig):
         self.timestep_dim = timestep_dim
         self.max_timesteps = max_timesteps
         self.use_sdpa = use_sdpa
+        self.use_moe = use_moe
+        self.num_experts = num_experts
+        self.num_experts_per_tok = num_experts_per_tok
 
 DiffusionConfig.register_for_auto_class("AutoConfig")
