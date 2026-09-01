@@ -518,6 +518,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         draft_model: Optional["PreTrainedModel"] = None,
         speculative_steps: int = 1,
         speculative_threshold: float = 0.5,
+        rag_retriever: Optional[Callable] = None,
+        rag_query_steps: Optional[list[int]] = None,
         **kwargs
     ):
         """
@@ -606,6 +608,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         watermark_processor = None
 
+        retrieved_len = 0
+
         for num_block in range(num_blocks):
             if max_time is not None and time.time() - start_time > max_time:
                 break
@@ -619,6 +623,39 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
             for i in range(steps_per_block):
                 if max_time is not None and time.time() - start_time > max_time:
                     break
+
+                if rag_retriever is not None and (rag_query_steps is None and i == 0 or (rag_query_steps is not None and i in rag_query_steps)):
+                    rag_query_x = x[:, retrieved_len:] if retrieved_len > 0 else x
+                    # We compute an approximate t_ratio for the rag retriever if it needs it
+                    query_mask_index = (rag_query_x == mask_id)
+                    query_t_ratio = query_mask_index.sum(dim=1).float() / (T - retrieved_len + max_new_tokens)
+                    query_timesteps = (query_t_ratio * self.config.max_timesteps).long().clamp(min=1, max=self.config.max_timesteps)
+
+                    retrieved_context = rag_retriever(rag_query_x, timesteps=query_timesteps)
+                    if retrieved_context is not None:
+                        retrieved_context = retrieved_context.to(device=device, dtype=dtype)
+                        new_retrieved_len = retrieved_context.size(1)
+
+                        if retrieved_len > 0:
+                            x = x[:, retrieved_len:]
+                            if attention_mask is not None:
+                                attention_mask = attention_mask[:, retrieved_len:]
+                            if unconditional_input_ids is not None:
+                                unconditional_input_ids = unconditional_input_ids[:, retrieved_len:]
+
+                        x = torch.cat([retrieved_context, x], dim=1)
+                        delta_len = new_retrieved_len - retrieved_len
+                        T += delta_len
+                        block_start += delta_len
+                        block_end += delta_len
+                        retrieved_len = new_retrieved_len
+
+                        if attention_mask is not None:
+                            retrieved_mask = torch.ones((batch_size, new_retrieved_len), device=device, dtype=attention_mask.dtype)
+                            attention_mask = torch.cat([retrieved_mask, attention_mask], dim=1)
+
+                        if unconditional_input_ids is not None:
+                            unconditional_input_ids = torch.cat([retrieved_context, unconditional_input_ids], dim=1)
 
                 step_ratio = i / max(1, steps_per_block - 1) if steps_per_block > 1 else 0.0
 
@@ -1573,6 +1610,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     # Pad the rest of the sequence
                     x[b, first_eos + 1:] = pad_token_id
 
+        if retrieved_len > 0:
+            x = x[:, retrieved_len:]
+
         if return_dict_in_generate:
             return {
                 "sequences": x,
@@ -1586,6 +1626,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         Processes a list of generation requests simultaneously using dynamic continuous batching.
         Each request configuration must contain at least 'input_ids' and 'max_new_tokens'.
         """
+        for config in requests_configs:
+            if config.get("rag_retriever") is not None or self.config.use_rag:
+                raise NotImplementedError("RAG is currently not supported with dynamic continuous batching.")
+
         manager = MDLMContinuousBatchingManager(self, max_batch_size=max_batch_size)
 
         request_ids = []

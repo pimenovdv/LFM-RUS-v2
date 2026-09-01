@@ -17,10 +17,16 @@ class DiffusionConfig(PretrainedConfig):
         use_moe=False,
         num_experts=8,
         num_experts_per_tok=2,
+        use_rag=False,
+        rag_query_steps=None,
+        rag_max_retrieved=128,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.base_config_dict = base_config_dict or {}
+        self.use_rag = use_rag
+        self.rag_query_steps = rag_query_steps
+        self.rag_max_retrieved = rag_max_retrieved
         self.mask_token_id = mask_token_id
         self.diffusion_steps = diffusion_steps
         self.remasking_strategy = remasking_strategy
