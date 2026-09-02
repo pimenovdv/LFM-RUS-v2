@@ -629,7 +629,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     # We compute an approximate t_ratio for the rag retriever if it needs it
                     query_mask_index = (rag_query_x == mask_id)
                     query_t_ratio = query_mask_index.sum(dim=1).float() / (T - retrieved_len + max_new_tokens)
-                    query_timesteps = (query_t_ratio * self.config.max_timesteps).long().clamp(min=1, max=self.config.max_timesteps)
+                    query_timesteps_raw = query_t_ratio * self.config.max_timesteps
+                    if getattr(self.config, 'continuous_time', False):
+                        query_timesteps = query_timesteps_raw.float()
+                    else:
+                        query_timesteps = query_timesteps_raw.long().clamp(min=1, max=self.config.max_timesteps)
 
                     retrieved_context = rag_retriever(rag_query_x, timesteps=query_timesteps)
                     if retrieved_context is not None:
@@ -664,7 +668,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 # We can supply timesteps if needed, but in basic sampling they are implicit or t=0 for unmasked
                 # A simple approximation: timesteps is proportional to remaining masks
                 t_ratio = mask_index.sum(dim=1).float() / (T + max_new_tokens)
-                current_timesteps = (t_ratio * self.config.max_timesteps).long().clamp(min=1, max=self.config.max_timesteps)
+                current_timesteps_raw = t_ratio * self.config.max_timesteps
+                if getattr(self.config, 'continuous_time', False):
+                    current_timesteps = current_timesteps_raw.float()
+                else:
+                    current_timesteps = current_timesteps_raw.long().clamp(min=1, max=self.config.max_timesteps)
 
                 control_states = None
                 if control_model is not None:
@@ -1732,7 +1740,11 @@ class MDLMContinuousBatchingManager:
             t_ratio = req.mask_index.sum().float() / req.x.size(1)
             t_ratios.append(t_ratio)
         t_ratios = torch.tensor(t_ratios, device=batch_x.device)
-        current_timesteps = (t_ratios * self.model.config.max_timesteps).long().clamp(min=1, max=self.model.config.max_timesteps)
+        current_timesteps_raw = t_ratios * self.model.config.max_timesteps
+        if getattr(self.model.config, 'continuous_time', False):
+            current_timesteps = current_timesteps_raw.float()
+        else:
+            current_timesteps = current_timesteps_raw.long().clamp(min=1, max=self.model.config.max_timesteps)
 
         # 4. Forward pass
         outputs = self.model(
