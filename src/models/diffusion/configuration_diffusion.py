@@ -20,11 +20,13 @@ class DiffusionConfig(PretrainedConfig):
         use_rag=False,
         rag_query_steps=None,
         rag_max_retrieved=128,
+        continuous_time=False,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.base_config_dict = base_config_dict or {}
         self.use_rag = use_rag
+        self.continuous_time = continuous_time
         self.rag_query_steps = rag_query_steps
         self.rag_max_retrieved = rag_max_retrieved
         self.mask_token_id = mask_token_id

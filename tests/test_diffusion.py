@@ -2183,3 +2183,78 @@ def test_generate_use_kv_cache_raises_error(mocker):
 
     with pytest.raises(NotImplementedError, match="KV-caching is currently not supported for Masked Diffusion Models"):
         model.generate(input_ids, max_new_tokens=4, steps=4, use_kv_cache=True)
+
+def test_continuous_time_diffusion(mocker):
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    import torch
+
+    config = DiffusionConfig(
+        vocab_size=100,
+        base_config_dict={"model_type": "gpt2", "vocab_size": 100, "hidden_size": 16, "num_hidden_layers": 1, "num_attention_heads": 2},
+        continuous_time=True,
+        mask_token_id=99,
+        diffusion_steps=2
+    )
+
+    model = DiffusionModelForConditionalGeneration(config)
+
+    # Mock __call__ to return dummy logits
+    def mock_forward(*args, **kwargs):
+        input_ids = kwargs.get('input_ids', args[0] if args else None)
+        logits = torch.randn(input_ids.shape[0], input_ids.shape[1], config.base_config_dict["vocab_size"])
+        class Output:
+            pass
+        out = Output()
+        out.logits = logits
+        return out
+
+    mocker.patch.object(model, 'forward', side_effect=mock_forward)
+
+    # Generate should process float timesteps without crashing
+    input_ids = torch.tensor([[1, 2, 3]])
+    output = model.generate(input_ids, max_new_tokens=2, steps=2)
+
+    assert output.shape == (1, 5)
+
+def test_continuous_time_continuous_batching(mocker):
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
+    import torch
+
+    config = DiffusionConfig(
+        vocab_size=100,
+        base_config_dict={"model_type": "gpt2", "vocab_size": 100, "hidden_size": 16, "num_hidden_layers": 1, "num_attention_heads": 2},
+        continuous_time=True,
+        mask_token_id=99,
+        max_timesteps=100
+    )
+    model = DiffusionModelForConditionalGeneration(config)
+
+    # Mock __call__ to track timesteps type
+    timesteps_types = []
+
+    def mock_forward(*args, **kwargs):
+        timesteps = kwargs.get('timesteps')
+        if timesteps is not None:
+            timesteps_types.append(timesteps.dtype)
+
+        input_ids = kwargs.get('input_ids')
+        logits = torch.randn(input_ids.shape[0], input_ids.shape[1], config.base_config_dict["vocab_size"])
+        class Output:
+            pass
+        out = Output()
+        out.logits = logits
+        return out
+
+    mocker.patch.object(model, 'forward', side_effect=mock_forward)
+
+    manager = MDLMContinuousBatchingManager(model, max_batch_size=2)
+    manager.add_request(torch.tensor([[1, 2]]), max_new_tokens=2, total_steps=2)
+    manager.step()
+    manager.step()
+    manager.step()
+
+    assert len(timesteps_types) > 0
+    # continuous_time is True, so timesteps should be float32
+    assert timesteps_types[0] == torch.float32
