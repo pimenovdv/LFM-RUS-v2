@@ -396,6 +396,68 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         else:
             return tuple(v for v in [loss, logits] if v is not None)
 
+    def compute_consistency_loss(self, input_ids_t, timesteps_t, input_ids_t_next, timesteps_t_next, target_model, attention_mask=None, **kwargs):
+        """
+        Computes the consistency distillation loss between the student (current model) and the target model.
+        The student is trained to predict the same probability distribution (or logits) from step t_next
+        as the target model predicts from step t, essentially learning to skip steps.
+
+        Args:
+            input_ids_t: Masked sequence at timestep t (closer to clean data)
+            timesteps_t: Timestep t
+            input_ids_t_next: Masked sequence at timestep t+1 (noisier data)
+            timesteps_t_next: Timestep t+1
+            target_model: The EMA target model
+            attention_mask: Attention mask
+            **kwargs: Additional arguments to pass to the forward pass
+        """
+        # Get target model predictions (detached, no gradients)
+        with torch.no_grad():
+            target_outputs = target_model(
+                input_ids=input_ids_t,
+                timesteps=timesteps_t,
+                attention_mask=attention_mask,
+                return_dict=True,
+                **kwargs
+            )
+            target_logits = target_outputs.logits
+
+        # Get student model predictions (requires gradients)
+        student_outputs = self(
+            input_ids=input_ids_t_next,
+            timesteps=timesteps_t_next,
+            attention_mask=attention_mask,
+            return_dict=True,
+            **kwargs
+        )
+        student_logits = student_outputs.logits
+
+        # Compute consistency loss using KL divergence between target and student logits
+        # Both represent predictions of the clean data x_0
+
+        # Log-Softmax for student
+        log_probs_student = F.log_softmax(student_logits, dim=-1)
+
+        # Softmax for target (probabilities)
+        probs_target = F.softmax(target_logits, dim=-1)
+
+        # We compute loss only on the masked positions in input_ids_t_next
+        mask_token_id = self.config.mask_token_id
+        is_masked = (input_ids_t_next == mask_token_id)
+
+        if is_masked.any():
+            # Apply mask, compute KL Div
+            kl_div = F.kl_div(log_probs_student, probs_target, reduction='none')
+            # Sum over vocab dimension
+            kl_div = kl_div.sum(dim=-1)
+            # Average over masked positions
+            loss = (kl_div * is_masked.float()).sum() / (is_masked.float().sum() + 1e-8)
+        else:
+            # If no tokens are masked (should not happen in normal training), loss is 0
+            loss = torch.tensor(0.0, device=student_logits.device, requires_grad=True)
+
+        return loss
+
     @torch.no_grad()
     def generate(
         self,
@@ -520,6 +582,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         speculative_threshold: float = 0.5,
         rag_retriever: Optional[Callable] = None,
         rag_query_steps: Optional[list[int]] = None,
+        consistency_sampling: bool = False,
         **kwargs
     ):
         """
@@ -585,6 +648,12 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         x = torch.full((batch_size, T + max_new_tokens), mask_id, dtype=dtype, device=device)
         x[:, :T] = input_ids
+
+        if consistency_sampling and steps > 1:
+            # Multi-step consistency sampling schedule
+            # Defines how much noise (how many tokens to mask) to inject at each step
+            # decreasing towards the final step
+            noise_schedule = torch.linspace(1.0, 0.0, steps=steps_per_block, device=device)
 
         if num_beams > 1:
             beam_scores = torch.zeros((original_batch_size, num_beams), dtype=torch.float, device=device)
@@ -1476,102 +1545,120 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 if hasattr(self, 'tokenizer') and self.tokenizer is not None:
                     x0 = filter_special_tokens(x0, self.tokenizer, mask_id)
 
-                if remasking == 'low_confidence':
-                    p = F.softmax(logits.to(torch.float64), dim=-1)
-                    x0_p = torch.squeeze(
-                        torch.gather(p, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
-                elif remasking == 'entropy':
-                    p = F.softmax(logits.to(torch.float64), dim=-1)
-                    entropy = -torch.sum(p * torch.log(p + 1e-9), dim=-1)
-                    # Lower entropy means higher confidence
-                    x0_p = -entropy
-                elif remasking == 'random':
-                    x0_p = torch.rand((x0.shape[0], x0.shape[1]), device=x0.device)
+                if consistency_sampling:
+                    # Consistency Models Algorithm
+                    x0 = torch.where(mask_index, x0, x)
+
+                    if i < steps_per_block - 1:
+                        # We are not at the last step, so we re-noise some tokens
+                        noise_ratio = noise_schedule[i+1].item()
+
+                        # Generate random noise map
+                        noise_map = torch.rand((x0.shape[0], x0.shape[1]), device=device)
+                        # We only re-noise tokens that were originally masked in this block
+                        renoise_mask = mask_index & (noise_map < noise_ratio)
+
+                        x = torch.where(renoise_mask, mask_id, x0)
+                    else:
+                        # Last step: just take the prediction
+                        x = x0
                 else:
-                    x0_p = torch.ones((x0.shape[0], x0.shape[1]), device=x0.device)
+                    if remasking == 'low_confidence':
+                        p = F.softmax(logits.to(torch.float64), dim=-1)
+                        x0_p = torch.squeeze(
+                            torch.gather(p, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
+                    elif remasking == 'entropy':
+                        p = F.softmax(logits.to(torch.float64), dim=-1)
+                        entropy = -torch.sum(p * torch.log(p + 1e-9), dim=-1)
+                        # Lower entropy means higher confidence
+                        x0_p = -entropy
+                    elif remasking == 'random':
+                        x0_p = torch.rand((x0.shape[0], x0.shape[1]), device=x0.device)
+                    else:
+                        x0_p = torch.ones((x0.shape[0], x0.shape[1]), device=x0.device)
 
-                x0_p[:, block_end:] = -np.inf
-                x0 = torch.where(mask_index, x0, x)
-                confidence = torch.where(mask_index, x0_p, -torch.tensor(np.inf, device=device))
+                    x0_p[:, block_end:] = -np.inf
+                    x0 = torch.where(mask_index, x0, x)
+                    confidence = torch.where(mask_index, x0_p, -torch.tensor(np.inf, device=device))
 
-                if unmasking_schedule == "entropy":
-                    p_ent = F.softmax(logits.to(torch.float64), dim=-1)
-                    ent_val = -torch.sum(p_ent * torch.log(p_ent + 1e-9), dim=-1)
-                    max_ent = math.log(logits.size(-1)) if logits.size(-1) > 1 else 1.0
-                    for b_idx in range(x.shape[0]):
-                        curr_masks = mask_index[b_idx].sum().item()
-                        remaining_steps = steps_per_block - i
-                        if remaining_steps <= 1:
-                            num_transfer_tokens[b_idx, i] = curr_masks
-                        elif curr_masks == 0:
-                            num_transfer_tokens[b_idx, i] = 0
-                        else:
-                            mean_ent = ent_val[b_idx][mask_index[b_idx]].mean().item()
-                            norm_ent = mean_ent / max_ent
-                            confidence_score = 1.0 - norm_ent
-                            target_tokens = max(1, int(curr_masks * confidence_score))
-                            linear_tokens = max(1, curr_masks // remaining_steps)
-                            num_transfer_tokens[b_idx, i] = int((target_tokens + linear_tokens) / 2)
-
-                if num_beams > 1:
-                    next_beam_scores = torch.full((original_batch_size, num_beams * num_beams), -1e9, device=device)
-                    next_beam_tokens = torch.zeros((original_batch_size, num_beams * num_beams, x.size(1)), dtype=x.dtype, device=device)
-
-                    log_probs = F.log_softmax(logits, dim=-1)
-
-                    for b_orig in range(original_batch_size):
-                        for b_beam in range(num_beams):
-                            b = b_orig * num_beams + b_beam
-                            M = num_transfer_tokens[b, i].item()
-
-                            if M > 0:
-                                _, select_index = torch.topk(confidence[b], k=M)
-                                branch_pos = select_index[-1]
-
-                                greedy_score = 0.0
-                                candidate_x = x[b].clone()
-                                for pos in select_index[:-1]:
-                                    tok = x0[b, pos]
-                                    candidate_x[pos] = tok
-                                    greedy_score += log_probs[b, pos, tok].item()
-
-                                top_v, top_i = torch.topk(log_probs[b, branch_pos], k=num_beams)
-
-                                for j in range(num_beams):
-                                    cand_score = beam_scores[b].item() + greedy_score + top_v[j].item()
-                                    cand_x = candidate_x.clone()
-                                    cand_x[branch_pos] = top_i[j]
-
-                                    idx = b_beam * num_beams + j
-                                    next_beam_scores[b_orig, idx] = cand_score
-                                    next_beam_tokens[b_orig, idx] = cand_x
+                    if unmasking_schedule == "entropy":
+                        p_ent = F.softmax(logits.to(torch.float64), dim=-1)
+                        ent_val = -torch.sum(p_ent * torch.log(p_ent + 1e-9), dim=-1)
+                        max_ent = math.log(logits.size(-1)) if logits.size(-1) > 1 else 1.0
+                        for b_idx in range(x.shape[0]):
+                            curr_masks = mask_index[b_idx].sum().item()
+                            remaining_steps = steps_per_block - i
+                            if remaining_steps <= 1:
+                                num_transfer_tokens[b_idx, i] = curr_masks
+                            elif curr_masks == 0:
+                                num_transfer_tokens[b_idx, i] = 0
                             else:
-                                for j in range(num_beams):
-                                    idx = b_beam * num_beams + j
-                                    if j == 0:
-                                        next_beam_scores[b_orig, idx] = beam_scores[b].item()
-                                        next_beam_tokens[b_orig, idx] = x[b].clone()
-                                    else:
-                                        next_beam_scores[b_orig, idx] = -1e9
-                                        next_beam_tokens[b_orig, idx] = x[b].clone()
+                                mean_ent = ent_val[b_idx][mask_index[b_idx]].mean().item()
+                                norm_ent = mean_ent / max_ent
+                                confidence_score = 1.0 - norm_ent
+                                target_tokens = max(1, int(curr_masks * confidence_score))
+                                linear_tokens = max(1, curr_masks // remaining_steps)
+                                num_transfer_tokens[b_idx, i] = int((target_tokens + linear_tokens) / 2)
 
-                    top_scores, top_indices = torch.topk(next_beam_scores, k=num_beams, dim=-1)
+                    if num_beams > 1:
+                        next_beam_scores = torch.full((original_batch_size, num_beams * num_beams), -1e9, device=device)
+                        next_beam_tokens = torch.zeros((original_batch_size, num_beams * num_beams, x.size(1)), dtype=x.dtype, device=device)
 
-                    for b_orig in range(original_batch_size):
-                        for b_beam in range(num_beams):
-                            b = b_orig * num_beams + b_beam
-                            idx = top_indices[b_orig, b_beam]
-                            beam_scores[b] = top_scores[b_orig, b_beam]
-                            x[b] = next_beam_tokens[b_orig, idx]
+                        log_probs = F.log_softmax(logits, dim=-1)
 
-                else:
-                    transfer_index = torch.zeros_like(x0, dtype=torch.bool, device=device)
-                    for j in range(confidence.shape[0]):
-                        if num_transfer_tokens[j, i] > 0:
-                            _, select_index = torch.topk(confidence[j], k=num_transfer_tokens[j, i])
-                            transfer_index[j, select_index] = True
+                        for b_orig in range(original_batch_size):
+                            for b_beam in range(num_beams):
+                                b = b_orig * num_beams + b_beam
+                                M = num_transfer_tokens[b, i].item()
 
-                    x[transfer_index] = x0[transfer_index].to(x.dtype)
+                                if M > 0:
+                                    _, select_index = torch.topk(confidence[b], k=M)
+                                    branch_pos = select_index[-1]
+
+                                    greedy_score = 0.0
+                                    candidate_x = x[b].clone()
+                                    for pos in select_index[:-1]:
+                                        tok = x0[b, pos]
+                                        candidate_x[pos] = tok
+                                        greedy_score += log_probs[b, pos, tok].item()
+
+                                    top_v, top_i = torch.topk(log_probs[b, branch_pos], k=num_beams)
+
+                                    for j in range(num_beams):
+                                        cand_score = beam_scores[b].item() + greedy_score + top_v[j].item()
+                                        cand_x = candidate_x.clone()
+                                        cand_x[branch_pos] = top_i[j]
+
+                                        idx = b_beam * num_beams + j
+                                        next_beam_scores[b_orig, idx] = cand_score
+                                        next_beam_tokens[b_orig, idx] = cand_x
+                                else:
+                                    for j in range(num_beams):
+                                        idx = b_beam * num_beams + j
+                                        if j == 0:
+                                            next_beam_scores[b_orig, idx] = beam_scores[b].item()
+                                            next_beam_tokens[b_orig, idx] = x[b].clone()
+                                        else:
+                                            next_beam_scores[b_orig, idx] = -1e9
+                                            next_beam_tokens[b_orig, idx] = x[b].clone()
+
+                        top_scores, top_indices = torch.topk(next_beam_scores, k=num_beams, dim=-1)
+
+                        for b_orig in range(original_batch_size):
+                            for b_beam in range(num_beams):
+                                b = b_orig * num_beams + b_beam
+                                idx = top_indices[b_orig, b_beam]
+                                beam_scores[b] = top_scores[b_orig, b_beam]
+                                x[b] = next_beam_tokens[b_orig, idx]
+
+                    else:
+                        transfer_index = torch.zeros_like(x0, dtype=torch.bool, device=device)
+                        for j in range(confidence.shape[0]):
+                            if num_transfer_tokens[j, i] > 0:
+                                _, select_index = torch.topk(confidence[j], k=num_transfer_tokens[j, i])
+                                transfer_index[j, select_index] = True
+
+                        x[transfer_index] = x0[transfer_index].to(x.dtype)
 
             if stopping_criteria is not None and stopping_criteria(x, logits):
                 break
