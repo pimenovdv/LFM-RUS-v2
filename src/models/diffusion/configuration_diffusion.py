@@ -21,11 +21,13 @@ class DiffusionConfig(PretrainedConfig):
         rag_query_steps=None,
         rag_max_retrieved=128,
         continuous_time=False,
+        is_consistency_model=False,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.base_config_dict = base_config_dict or {}
         self.use_rag = use_rag
+        self.is_consistency_model = is_consistency_model
         self.continuous_time = continuous_time
         self.rag_query_steps = rag_query_steps
         self.rag_max_retrieved = rag_max_retrieved

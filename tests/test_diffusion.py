@@ -2258,3 +2258,92 @@ def test_continuous_time_continuous_batching(mocker):
     assert len(timesteps_types) > 0
     # continuous_time is True, so timesteps should be float32
     assert timesteps_types[0] == torch.float32
+
+def test_compute_consistency_loss(mocker):
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    import torch
+    import torch.nn.functional as F
+
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
+    student_model = DiffusionModelForConditionalGeneration(config)
+    target_model = DiffusionModelForConditionalGeneration(config)
+
+    input_ids_t = torch.tensor([[1, 0, 3]])
+    timesteps_t = torch.tensor([5])
+    input_ids_t_next = torch.tensor([[1, 0, 0]])
+    timesteps_t_next = torch.tensor([6])
+
+    with torch.no_grad():
+        target_outputs = mocker.MagicMock()
+        target_outputs.logits = torch.randn(1, 3, 10)
+        mocker.patch.object(target_model, 'forward', return_value=target_outputs)
+
+    student_outputs = mocker.MagicMock()
+    student_logits = torch.randn(1, 3, 10, requires_grad=True)
+    student_outputs.logits = student_logits
+    mocker.patch.object(student_model, 'forward', return_value=student_outputs)
+
+    loss = student_model.compute_consistency_loss(
+        input_ids_t=input_ids_t,
+        timesteps_t=timesteps_t,
+        input_ids_t_next=input_ids_t_next,
+        timesteps_t_next=timesteps_t_next,
+        target_model=target_model
+    )
+
+    assert loss is not None
+    assert loss.requires_grad
+
+def test_consistency_sampling(mocker):
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    import torch
+
+    mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")
+    mock_inner = mocker.MagicMock()
+    mock_auto_model.from_config.return_value = mock_inner
+    mocker.patch("src.models.diffusion.modeling_diffusion.getattr", return_value=False)
+
+    config = DiffusionConfig(
+        base_config_dict={"hidden_size": 12, "vocab_size": 10},
+        timestep_dim=8,
+        mask_token_id=0,
+        max_timesteps=10,
+        diffusion_steps=3
+    )
+    model = DiffusionModelForConditionalGeneration(config)
+    model.lm_head = torch.nn.Linear(12, 10, bias=False)
+
+    input_ids = torch.tensor([[1, 2]])
+
+    with torch.no_grad():
+        mock_forward = mocker.patch.object(DiffusionModelForConditionalGeneration, 'forward')
+        vocab_size = 10
+
+        def forward_side_effect(*args, **kwargs):
+            seq_len = kwargs.get('input_ids', args[0] if args else None).shape[1]
+            out = torch.zeros(1, seq_len, vocab_size)
+            out[:, -1, 3] = 10.0
+            mock_out = mocker.MagicMock()
+            mock_out.logits = out
+            return mock_out
+
+        mock_forward.side_effect = forward_side_effect
+
+        # Test with consistency_sampling enabled
+        outputs = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=2,
+            steps=3,
+            consistency_sampling=True
+        )
+
+        assert outputs.shape == (1, 4)
