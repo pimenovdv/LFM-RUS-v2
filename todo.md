@@ -6,7 +6,7 @@
 **Сжатое описание:**
 Реализована полнофункциональная интеграция MDLM. Она включает базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, Mixture of Experts (MoE), Retrieval-Augmented Generation (RAG) и Continuous Time Diffusion. Также успешно внедрена дистилляция консистентности (Consistency Models Distillation) для ускорения генерации путем минимизации KL-дивергенции логарифмов вероятностей между target и student моделями и интеграции многошагового consistency сэмплинга.
 
-## [ ] Шаг 71: Внедрение FlashAttention-2 для маскированной диффузии
+## [x] Шаг 71: Внедрение FlashAttention-2 для маскированной диффузии
 **Цель:** Заменить стандартную реализацию SDPA на `FlashAttention-2` при `use_flash_attention_2=True`. Это позволит значительно снизить потребление памяти и ускорить обучение MDLM на очень длинных контекстах. Поскольку MDLM использует двунаправленное внимание (bidirectional mask) с динамическими масками, потребуется адаптация вызовов FlashAttention для работы без казуальных ограничений.
 
 ## [ ] Шаг 72: Интеграция Latent Masked Diffusion (LMDLM)

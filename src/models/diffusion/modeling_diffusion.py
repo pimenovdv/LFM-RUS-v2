@@ -144,7 +144,9 @@ class DiffusionControlNetModel(PreTrainedModel):
         super().__init__(config)
 
         base_config = AutoConfig.for_model(**config.base_config_dict)
-        if getattr(config, "use_sdpa", False):
+        if getattr(config, "use_flash_attention_2", False):
+            base_config._attn_implementation = "flash_attention_2"
+        elif getattr(config, "use_sdpa", False):
             base_config._attn_implementation = "sdpa"
 
         # We need the inner model to process conditions and output hidden states
@@ -216,7 +218,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         super().__init__(config)
 
         base_config = AutoConfig.for_model(**config.base_config_dict)
-        if getattr(config, "use_sdpa", False):
+        if getattr(config, "use_flash_attention_2", False):
+            base_config._attn_implementation = "flash_attention_2"
+        elif getattr(config, "use_sdpa", False):
             base_config._attn_implementation = "sdpa"
         self.inner_model = AutoModel.from_config(base_config)
         self._disable_causal_mask()
