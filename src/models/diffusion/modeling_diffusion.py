@@ -133,6 +133,177 @@ class SparseMoEBlock(nn.Module):
         final_hidden_states = final_hidden_states.view(batch_size, sequence_length, hidden_dim)
         return final_hidden_states
 
+class VectorQuantizer(nn.Module):
+    """
+    Vector Quantizer module for Latent Diffusion.
+    """
+    def __init__(self, num_embeddings: int, embedding_dim: int, commitment_cost: float = 0.25):
+        super().__init__()
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.commitment_cost = commitment_cost
+
+        self.embedding = nn.Embedding(self.num_embeddings, self.embedding_dim)
+        self.embedding.weight.data.uniform_(-1 / self.num_embeddings, 1 / self.num_embeddings)
+
+    def forward(self, inputs: torch.Tensor):
+        # inputs shape: (batch_size, seq_len, embedding_dim)
+        flat_inputs = inputs.reshape(-1, self.embedding_dim)
+
+        # Calculate distances
+        distances = (torch.sum(flat_inputs**2, dim=1, keepdim=True)
+                    + torch.sum(self.embedding.weight**2, dim=1)
+                    - 2 * torch.matmul(flat_inputs, self.embedding.weight.t()))
+
+        # Encoding
+        encoding_indices = torch.argmin(distances, dim=1).unsqueeze(1)
+        encodings = torch.zeros(encoding_indices.shape[0], self.num_embeddings, device=inputs.device)
+        encodings.scatter_(1, encoding_indices, 1)
+
+        # Quantize and unflatten
+        quantized = torch.matmul(encodings, self.embedding.weight).view(inputs.shape)
+
+        # Loss
+        e_latent_loss = F.mse_loss(quantized.detach(), inputs)
+        q_latent_loss = F.mse_loss(quantized, inputs.detach())
+        loss = q_latent_loss + self.commitment_cost * e_latent_loss
+
+        quantized = inputs + (quantized - inputs).detach()
+
+        return quantized, loss, encoding_indices.view(inputs.shape[0], inputs.shape[1])
+
+
+class TextAutoencoder(nn.Module):
+    """
+    Autoencoder to map tokens into a continuous latent space and quantize them.
+    """
+    def __init__(self, config: DiffusionConfig):
+        super().__init__()
+        self.config = config
+
+        if 'model_type' in config.base_config_dict:
+            base_config = AutoConfig.for_model(**config.base_config_dict)
+        else:
+            base_config = AutoConfig.for_model("gpt2", **config.base_config_dict)
+
+        self.encoder_model = AutoModel.from_config(base_config)
+        self.decoder_model = AutoModel.from_config(base_config)
+
+        # VQ Module
+        self.vq = VectorQuantizer(
+            num_embeddings=config.vq_num_embeddings,
+            embedding_dim=config.vq_embedding_dim
+        )
+
+        self.pre_quant_proj = nn.Linear(base_config.hidden_size, config.vq_embedding_dim)
+        self.post_quant_proj = nn.Linear(config.vq_embedding_dim, base_config.hidden_size)
+
+        self.lm_head = nn.Linear(base_config.hidden_size, base_config.vocab_size, bias=False)
+
+    def forward(self, input_ids=None, inputs_embeds=None, attention_mask=None, return_dict=True):
+        if inputs_embeds is None:
+            encoder_outputs = self.encoder_model(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
+        else:
+            encoder_outputs = self.encoder_model(inputs_embeds=inputs_embeds, attention_mask=attention_mask, return_dict=True)
+
+        hidden_states = encoder_outputs.last_hidden_state
+
+        # Project to VQ dim
+        quant_input = self.pre_quant_proj(hidden_states)
+
+        # Quantize
+        quantized, vq_loss, vq_indices = self.vq(quant_input)
+
+        # Project back to hidden size
+        decoder_input = self.post_quant_proj(quantized)
+
+        # Decode
+        decoder_outputs = self.decoder_model(inputs_embeds=decoder_input, attention_mask=attention_mask, return_dict=True)
+
+        logits = self.lm_head(decoder_outputs.last_hidden_state)
+
+        if return_dict:
+            from transformers.modeling_outputs import CausalLMOutputWithPast
+            return CausalLMOutputWithPast(
+                loss=vq_loss,
+                logits=logits,
+                past_key_values=None,
+                hidden_states=quantized,
+                attentions=None,
+            )
+        return (vq_loss, logits, quantized)
+
+
+class LatentDiffusionModelForConditionalGeneration(PreTrainedModel):
+    """
+    Wrapper for Latent Masked Diffusion Language Model.
+    """
+    config_class = DiffusionConfig
+
+    def __init__(self, config: DiffusionConfig):
+        super().__init__(config)
+        self.autoencoder = TextAutoencoder(config)
+
+        # Modify diffusion model to operate on latent space instead of tokens
+        # For simplicity, we just use the DiffusionModelForConditionalGeneration
+        # but configured to predict VQ embeddings.
+        diffusion_config_dict = config.to_dict()
+        diffusion_config_dict['base_config_dict']['vocab_size'] = config.vq_num_embeddings
+        self.diffusion_model = DiffusionModelForConditionalGeneration(DiffusionConfig(**diffusion_config_dict))
+
+    def forward(self, input_ids=None, timesteps=None, attention_mask=None, labels=None, **kwargs):
+        # 1. Encode into latents
+        with torch.no_grad():
+            enc_outputs = self.autoencoder(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
+            # vq_indices represent the tokens in the latent space
+            # but since we want to run diffusion on these tokens, we extract the indices from the quantizer
+            hidden_states = enc_outputs.hidden_states # this is quantized continuous vector
+
+            # Recompute vq_indices to run diffusion on them
+            flat_inputs = self.autoencoder.pre_quant_proj(self.autoencoder.encoder_model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state).reshape(-1, self.autoencoder.vq.embedding_dim)
+            distances = (torch.sum(flat_inputs**2, dim=1, keepdim=True)
+                        + torch.sum(self.autoencoder.vq.embedding.weight**2, dim=1)
+                        - 2 * torch.matmul(flat_inputs, self.autoencoder.vq.embedding.weight.t()))
+            latent_indices = torch.argmin(distances, dim=1).view(input_ids.shape[0], input_ids.shape[1])
+
+        # If labels are provided, they are the target latent_indices
+        target_latents = latent_indices.clone() if labels is not None else None
+
+        # 2. Forward through diffusion model
+        diff_outputs = self.diffusion_model(
+            input_ids=latent_indices,
+            timesteps=timesteps,
+            attention_mask=attention_mask,
+            labels=target_latents,
+            **kwargs
+        )
+
+        return diff_outputs
+
+    def generate(self, input_ids: torch.Tensor, **kwargs):
+        # 1. Encode prompt to latents
+        with torch.no_grad():
+            flat_inputs = self.autoencoder.pre_quant_proj(self.autoencoder.encoder_model(input_ids=input_ids).last_hidden_state).reshape(-1, self.autoencoder.vq.embedding_dim)
+            distances = (torch.sum(flat_inputs**2, dim=1, keepdim=True)
+                        + torch.sum(self.autoencoder.vq.embedding.weight**2, dim=1)
+                        - 2 * torch.matmul(flat_inputs, self.autoencoder.vq.embedding.weight.t()))
+            latent_indices = torch.argmin(distances, dim=1).view(input_ids.shape[0], input_ids.shape[1])
+
+        # 2. Generate latents using diffusion model
+        generated_latents = self.diffusion_model.generate(input_ids=latent_indices, **kwargs)
+
+        # 3. Decode latents to text
+        with torch.no_grad():
+            # Get continuous embeddings from latent indices
+            quantized = self.autoencoder.vq.embedding(generated_latents)
+            decoder_input = self.autoencoder.post_quant_proj(quantized)
+            decoder_outputs = self.autoencoder.decoder_model(inputs_embeds=decoder_input)
+            logits = self.autoencoder.lm_head(decoder_outputs.last_hidden_state)
+            generated_tokens = torch.argmax(logits, dim=-1)
+
+        return generated_tokens
+
+
 class DiffusionControlNetModel(PreTrainedModel):
     """
     ControlNet-like conditioning model for Diffusion Language Models.
@@ -143,7 +314,10 @@ class DiffusionControlNetModel(PreTrainedModel):
     def __init__(self, config: DiffusionConfig):
         super().__init__(config)
 
-        base_config = AutoConfig.for_model(**config.base_config_dict)
+        if 'model_type' in config.base_config_dict:
+            base_config = AutoConfig.for_model(**config.base_config_dict)
+        else:
+            base_config = AutoConfig.for_model("gpt2", **config.base_config_dict)
         if getattr(config, "use_flash_attention_2", False):
             base_config._attn_implementation = "flash_attention_2"
         elif getattr(config, "use_sdpa", False):
@@ -459,6 +633,64 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         else:
             # If no tokens are masked (should not happen in normal training), loss is 0
             loss = torch.tensor(0.0, device=student_logits.device, requires_grad=True)
+
+        return loss
+
+    def compute_flow_matching_loss(self, input_ids_t, timesteps_t, target_ids, attention_mask=None, **kwargs):
+        """
+        Computes the Discrete Flow Matching loss.
+        The model predicts the original data distribution (logits). We construct a target
+        distribution which is a mix between the masked state and the true data state,
+        and minimize Cross Entropy (or KL divergence) between predicted logits and this target.
+        """
+        # Forward pass to get predictions for x0
+        outputs = self(
+            input_ids=input_ids_t,
+            timesteps=timesteps_t,
+            attention_mask=attention_mask,
+            return_dict=True,
+            **kwargs
+        )
+        logits = outputs.logits
+
+        # t goes from 0 to max_timesteps. Flow matching uses t to interpolate probabilities.
+        # Let's say t_normalized is t / max_timesteps
+        t_normalized = timesteps_t.float() / self.config.max_timesteps
+        t_normalized = t_normalized.unsqueeze(1).unsqueeze(2) # shape: (batch, 1, 1)
+
+        vocab_size = self.config.base_config_dict.get('vocab_size', logits.size(-1))
+        mask_token_id = self.config.mask_token_id
+
+        # We only compute loss on masked positions
+        is_masked = (input_ids_t == mask_token_id)
+
+        if is_masked.any():
+            # Create a one-hot representation of the target ids
+            target_one_hot = F.one_hot(target_ids.clamp(0, vocab_size - 1), num_classes=vocab_size).float()
+
+            # The target distribution for flow matching at time t is an interpolation:
+            # (1 - t) * target_one_hot + t * mask_distribution
+            # Assuming mask_distribution puts all probability mass on mask_token_id
+            # However, standard discrete flow matching (like in DirFM) matches the transition rate.
+            # For simplicity, we just use the target_one_hot as the ground truth to predict x0,
+            # but scale the loss by a flow-matching derivative term or just use standard CE on the target.
+            # In a basic discrete flow matching setup, the loss is the cross entropy to the true target
+            # for the currently masked tokens.
+
+            # Here we implement a simple flow matching objective: Cross entropy scaled by 1/(1-t)
+            # which is typical for some continuous time formulations.
+
+            loss_fct = nn.CrossEntropyLoss(reduction='none')
+            loss = loss_fct(logits.view(-1, vocab_size), target_ids.view(-1))
+            loss = loss.view_as(target_ids)
+
+            # Scale loss by t-dependent weighting for flow matching
+            # Weight = 1 / max(1 - t_normalized, 1e-5)
+            weight = 1.0 / (1.0 - t_normalized + 1e-5).squeeze(2)
+
+            loss = (loss * weight * is_masked.float()).sum() / (is_masked.float().sum() + 1e-8)
+        else:
+            loss = torch.tensor(0.0, device=logits.device, requires_grad=True)
 
         return loss
 

@@ -23,9 +23,17 @@ class DiffusionConfig(PretrainedConfig):
         rag_max_retrieved=128,
         continuous_time=False,
         is_consistency_model=False,
+        use_latent_diffusion=False,
+        vq_num_embeddings=512,
+        vq_embedding_dim=64,
+        use_flow_matching=False,
         **kwargs
     ):
         super().__init__(**kwargs)
+        self.use_flow_matching = use_flow_matching
+        self.use_latent_diffusion = use_latent_diffusion
+        self.vq_num_embeddings = vq_num_embeddings
+        self.vq_embedding_dim = vq_embedding_dim
         self.base_config_dict = base_config_dict or {}
         self.use_rag = use_rag
         self.is_consistency_model = is_consistency_model
