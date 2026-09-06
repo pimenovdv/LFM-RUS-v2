@@ -556,10 +556,20 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         loss = None
         if labels is not None:
-            loss_fct = nn.CrossEntropyLoss()
-            # Shift so that tokens < n predict n - we don't do this for diffusion
-            # Calculate loss only on positions where labels != -100 (which corresponds to masked positions)
-            loss = loss_fct(logits.view(-1, self.config.base_config_dict.get('vocab_size', logits.size(-1))), labels.view(-1))
+            if getattr(self.config, "use_flow_matching", False) and timesteps is not None:
+                # Use Discrete Flow Matching loss
+                loss = self.compute_flow_matching_loss(
+                    input_ids_t=input_ids if input_ids is not None else kwargs.get("input_ids_t"),
+                    timesteps_t=timesteps,
+                    target_ids=labels,
+                    attention_mask=attention_mask,
+                    logits=logits
+                )
+            else:
+                loss_fct = nn.CrossEntropyLoss()
+                # Shift so that tokens < n predict n - we don't do this for diffusion
+                # Calculate loss only on positions where labels != -100 (which corresponds to masked positions)
+                loss = loss_fct(logits.view(-1, self.config.base_config_dict.get('vocab_size', logits.size(-1))), labels.view(-1))
 
         return_dict = kwargs.get('return_dict', True)
         if return_dict:
@@ -636,22 +646,23 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         return loss
 
-    def compute_flow_matching_loss(self, input_ids_t, timesteps_t, target_ids, attention_mask=None, **kwargs):
+    def compute_flow_matching_loss(self, input_ids_t, timesteps_t, target_ids, attention_mask=None, logits=None, **kwargs):
         """
         Computes the Discrete Flow Matching loss.
         The model predicts the original data distribution (logits). We construct a target
         distribution which is a mix between the masked state and the true data state,
         and minimize Cross Entropy (or KL divergence) between predicted logits and this target.
         """
-        # Forward pass to get predictions for x0
-        outputs = self(
-            input_ids=input_ids_t,
-            timesteps=timesteps_t,
-            attention_mask=attention_mask,
-            return_dict=True,
-            **kwargs
-        )
-        logits = outputs.logits
+        # If logits are not provided, compute them via forward pass
+        if logits is None:
+            outputs = self(
+                input_ids=input_ids_t,
+                timesteps=timesteps_t,
+                attention_mask=attention_mask,
+                return_dict=True,
+                **kwargs
+            )
+            logits = outputs.logits
 
         # t goes from 0 to max_timesteps. Flow matching uses t to interpolate probabilities.
         # Let's say t_normalized is t / max_timesteps

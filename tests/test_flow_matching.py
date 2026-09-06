@@ -43,3 +43,23 @@ def test_flow_matching_loss_no_masks(mock_config):
 
     assert loss.shape == torch.Size([])
     assert loss.item() == 0.0
+
+def test_forward_uses_flow_matching_logic(mock_config):
+    model = DiffusionModelForConditionalGeneration(mock_config)
+    input_ids = torch.randint(1, 100, (2, 10))
+    # mask some tokens
+    input_ids[:, 5:] = mock_config.mask_token_id
+
+    timesteps = torch.tensor([10, 50])
+    target_ids = torch.randint(1, 100, (2, 10))
+
+    # Calculate loss without flow matching
+    model.config.use_flow_matching = False
+    output_ce = model(input_ids=input_ids, timesteps=timesteps, labels=target_ids, return_dict=True)
+
+    # Calculate loss with flow matching
+    model.config.use_flow_matching = True
+    output_fm = model(input_ids=input_ids, timesteps=timesteps, labels=target_ids, return_dict=True)
+
+    # Losses should be different
+    assert not torch.allclose(output_ce.loss, output_fm.loss)
