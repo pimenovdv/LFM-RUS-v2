@@ -830,6 +830,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         rag_retriever: Optional[Callable] = None,
         rag_query_steps: Optional[list[int]] = None,
         consistency_sampling: bool = False,
+        amateur_model: Optional["PreTrainedModel"] = None,
+        contrastive_alpha: float = 0.5,
         **kwargs
     ):
         """
@@ -1222,6 +1224,20 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         grads = torch.autograd.grad(classifier_score.sum(), logits_with_grad)[0]
 
                     logits = logits + current_classifier_scale * grads
+
+                if amateur_model is not None:
+                    amateur_outputs = amateur_model(
+                        input_ids=x,
+                        attention_mask=attention_mask,
+                        timesteps=current_timesteps,
+                        return_dict=True
+                    )
+                    amateur_logits = amateur_outputs.logits
+
+                    if renormalize_logits:
+                        amateur_logits = F.log_softmax(amateur_logits, dim=-1)
+
+                    logits = logits - contrastive_alpha * amateur_logits
 
                 if suppress_tokens is not None:
                     logits[:, :, suppress_tokens] = -float("Inf")
