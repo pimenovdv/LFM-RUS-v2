@@ -417,6 +417,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 num_experts_per_tok=getattr(config, "num_experts_per_tok", 2)
             )
 
+        if getattr(config, "use_self_conditioning", False):
+            self.self_conditioning_proj = nn.Linear(base_config.vocab_size, base_config.hidden_size)
+        else:
+            self.self_conditioning_proj = None
+
     def _disable_causal_mask(self):
         """
         Dynamic patching to disable causality.
@@ -852,6 +857,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         original_batch_size = input_ids.size(0)
         batch_multiplier = num_beams if num_beams > 1 else num_return_sequences
 
+        # Local variable to hold previous logits for self-conditioning
+        prev_logits = None
+
         if batch_multiplier > 1:
             input_ids = input_ids.repeat_interleave(batch_multiplier, dim=0)
             if attention_mask is not None:
@@ -1039,17 +1047,46 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                             spec_tokens[j, draft_select_index] = True
                             x[j, draft_select_index] = draft_x0[j, draft_select_index].to(x.dtype)
 
-                outputs = self(
-                    input_ids=x,
-                    attention_mask=attention_mask,
-                    timesteps=current_timesteps,
-                    steering_vector=steering_vector,
-                    steering_layer_name=steering_layer_name,
-                    steering_scale=steering_scale,
-                    control_states=control_states,
-                    control_scale=control_scale
-                )
+                inputs_embeds = None
+                if getattr(self.config, "use_self_conditioning", False) and i > 0 and prev_logits is not None:
+                    std_embeds = self.inner_model.get_input_embeddings()(x)
+
+                    if prev_logits.size(1) < std_embeds.size(1):
+                        pad_len = std_embeds.size(1) - prev_logits.size(1)
+                        pad_tensor = torch.zeros((prev_logits.size(0), pad_len, prev_logits.size(2)), device=prev_logits.device, dtype=prev_logits.dtype)
+                        padded_prev_logits = torch.cat([prev_logits, pad_tensor], dim=1)
+                    else:
+                        padded_prev_logits = prev_logits[:, :std_embeds.size(1), :]
+
+                    sc_embeds = self.self_conditioning_proj(torch.softmax(padded_prev_logits, dim=-1))
+                    inputs_embeds = std_embeds + sc_embeds
+
+                if inputs_embeds is not None:
+                    outputs = self(
+                        inputs_embeds=inputs_embeds,
+                        attention_mask=attention_mask,
+                        timesteps=current_timesteps,
+                        steering_vector=steering_vector,
+                        steering_layer_name=steering_layer_name,
+                        steering_scale=steering_scale,
+                        control_states=control_states,
+                        control_scale=control_scale
+                    )
+                else:
+                    outputs = self(
+                        input_ids=x,
+                        attention_mask=attention_mask,
+                        timesteps=current_timesteps,
+                        steering_vector=steering_vector,
+                        steering_layer_name=steering_layer_name,
+                        steering_scale=steering_scale,
+                        control_states=control_states,
+                        control_scale=control_scale
+                    )
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+
+                if getattr(self.config, "use_self_conditioning", False):
+                    prev_logits = logits.detach()
 
                 if draft_model is not None:
                     # Verification step

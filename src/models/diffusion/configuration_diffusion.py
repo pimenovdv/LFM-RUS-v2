@@ -27,10 +27,12 @@ class DiffusionConfig(PretrainedConfig):
         vq_num_embeddings=512,
         vq_embedding_dim=64,
         use_flow_matching=False,
+        use_self_conditioning=False,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.use_flow_matching = use_flow_matching
+        self.use_self_conditioning = use_self_conditioning
         self.use_latent_diffusion = use_latent_diffusion
         self.vq_num_embeddings = vq_num_embeddings
         self.vq_embedding_dim = vq_embedding_dim
