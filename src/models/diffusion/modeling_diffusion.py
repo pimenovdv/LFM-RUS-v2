@@ -405,6 +405,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
             nn.Linear(config.timestep_dim, base_config.hidden_size)
         )
 
+        if getattr(config, "use_self_conditioning", False):
+            self.self_cond_proj = nn.Linear(base_config.vocab_size, base_config.hidden_size)
+
         self.lm_head = nn.Linear(base_config.hidden_size, base_config.vocab_size, bias=False)
 
         if getattr(base_config, "tie_word_embeddings", False):
@@ -490,12 +493,44 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
     def set_input_embeddings(self, value):
         self.inner_model.set_input_embeddings(value)
 
-    def forward(self, input_ids=None, timesteps=None, attention_mask=None, inputs_embeds=None, labels=None, steering_vector=None, steering_layer_name=None, steering_scale=1.0, control_states=None, control_scale=1.0, **kwargs):
+    def forward(self, input_ids=None, timesteps=None, attention_mask=None, inputs_embeds=None, labels=None, steering_vector=None, steering_layer_name=None, steering_scale=1.0, control_states=None, control_scale=1.0, self_cond_states=None, **kwargs):
+        # 1. Self-conditioning prep if needed
+        if getattr(self.config, "use_self_conditioning", False):
+            if self_cond_states is None and self.training and kwargs.get('is_first_pass', True):
+                # Apply self-conditioning with 50% probability during training
+                if torch.rand(1).item() < 0.5:
+                    with torch.no_grad():
+                        # Do a forward pass without gradients to get previous step logits
+                        first_pass_kwargs = kwargs.copy()
+                        first_pass_kwargs.pop("return_dict", None)
+
+                        outputs_first_pass = self(
+                            input_ids=input_ids,
+                            timesteps=timesteps,
+                            attention_mask=attention_mask,
+                            inputs_embeds=inputs_embeds,
+                            labels=None, # no need to calculate loss here
+                            is_first_pass=False,
+                            return_dict=True,
+                            **first_pass_kwargs
+                        )
+                        self_cond_states = outputs_first_pass.logits.detach()
+
+            if self_cond_states is not None:
+                # Project the logits to hidden size
+                # Apply softmax before projection to convert logits to probabilities
+                from torch.nn import functional as F
+                self_cond_states_probs = F.softmax(self_cond_states, dim=-1)
+                self_cond_embeds = self.self_cond_proj(self_cond_states_probs)
+
         if inputs_embeds is None:
             if input_ids is None:
                 raise ValueError("You have to specify either input_ids or inputs_embeds")
             embeddings_layer = self.inner_model.get_input_embeddings()
             inputs_embeds = embeddings_layer(input_ids)
+
+        if getattr(self.config, "use_self_conditioning", False) and self_cond_states is not None:
+            inputs_embeds = inputs_embeds + self_cond_embeds
 
         if timesteps is not None:
             t_embed = self.timestep_embedder(timesteps.unsqueeze(-1).float())
@@ -928,6 +963,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         retrieved_len = 0
 
+        # Will hold the logits from the previous step for self-conditioning
+        prev_logits = None
+
         for num_block in range(num_blocks):
             if max_time is not None and time.time() - start_time > max_time:
                 break
@@ -1039,6 +1077,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                             spec_tokens[j, draft_select_index] = True
                             x[j, draft_select_index] = draft_x0[j, draft_select_index].to(x.dtype)
 
+                # Self-conditioning in generation
+                self_cond_states = None
+                if getattr(self.config, "use_self_conditioning", False) and i > 0 and prev_logits is not None:
+                    self_cond_states = prev_logits
+
                 outputs = self(
                     input_ids=x,
                     attention_mask=attention_mask,
@@ -1047,9 +1090,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     steering_layer_name=steering_layer_name,
                     steering_scale=steering_scale,
                     control_states=control_states,
-                    control_scale=control_scale
+                    control_scale=control_scale,
+                    self_cond_states=self_cond_states
                 )
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+                prev_logits = logits.detach()
 
                 if draft_model is not None:
                     # Verification step
