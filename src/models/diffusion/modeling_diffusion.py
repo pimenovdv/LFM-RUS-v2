@@ -502,6 +502,30 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
             embeddings_layer = self.inner_model.get_input_embeddings()
             inputs_embeds = embeddings_layer(input_ids)
 
+        if getattr(self.config, "use_self_conditioning", False) and self.training and torch.rand(1).item() > 0.5:
+            # Preliminary pass for joint self-conditioning
+            with torch.no_grad():
+                if timesteps is not None:
+                    t_embed_pre = self.timestep_embedder(timesteps.unsqueeze(-1).float())
+                    hidden_states_pre = inputs_embeds + t_embed_pre.unsqueeze(1)
+                else:
+                    hidden_states_pre = inputs_embeds
+
+                pre_kwargs = kwargs.copy()
+                if 'return_dict' in pre_kwargs:
+                    del pre_kwargs['return_dict']
+
+                pre_outputs = self.inner_model(
+                    inputs_embeds=hidden_states_pre,
+                    attention_mask=attention_mask,
+                    return_dict=True,
+                    **pre_kwargs
+                )
+                prev_logits = self.lm_head(pre_outputs.last_hidden_state).detach()
+
+            sc_embeds = self.self_conditioning_proj(torch.softmax(prev_logits, dim=-1))
+            inputs_embeds = inputs_embeds + sc_embeds
+
         if timesteps is not None:
             t_embed = self.timestep_embedder(timesteps.unsqueeze(-1).float())
             hidden_states = inputs_embeds + t_embed.unsqueeze(1)

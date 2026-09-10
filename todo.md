@@ -2,14 +2,14 @@
 
 Этот документ содержит пошаговый план разработки для интеграции маскированной дискретной диффузии в существующий пайплайн обучения.
 
-## [x] Завершенные этапы (Шаги 1-74)
+## [x] Завершенные этапы (Шаги 1-75)
 **Сжатое описание:**
-Реализована полнофункциональная интеграция MDLM, включая базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, Mixture of Experts (MoE), Retrieval-Augmented Generation (RAG) и Continuous Time Diffusion. Внедрена дистилляция консистентности (Consistency Models Distillation). Добавлена интеграция FlashAttention-2 для двунаправленного маскирования (Шаг 71). Реализована Latent Masked Diffusion (LMDLM) через автоэнкодер и векторное квантование (Шаг 72). Интегрирован подход Discrete Flow Matching (`compute_flow_matching_loss`) как альтернатива классической диффузии (Шаг 73). Добавлена поддержка Contrastive Decoding для повышения специфичности генерации с использованием amateur-модели (Шаг 74).
+Реализована полнофункциональная интеграция MDLM, включая базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, Mixture of Experts (MoE), Retrieval-Augmented Generation (RAG), Continuous Time Diffusion, дистилляцию консистентности (Consistency Models Distillation), интеграцию FlashAttention-2 (Шаг 71), Latent Masked Diffusion (Шаг 72), Discrete Flow Matching (Шаг 73), Contrastive Decoding (Шаг 74) и поддержку Self-Conditioning во время инференса (Шаг 75).
 
-## [x] Шаг 75: Реализация поддержки Self-Conditioning для MDLM во время инференса
-**Цель:** Реализовать поддержку Self-Conditioning (самообусловливания) в процессе генерации для `DiffusionModelForConditionalGeneration`. Эта техника позволяет модели на текущем шаге диффузии использовать свой собственный прогноз логитов (или вероятностей) с предыдущего шага, подавая его как дополнительное условие. Это улучшает согласованность и качество генерации.
+## [x] Шаг 76: Поддержка Joint Self-Conditioning во время обучения MDLM
+**Цель:** Внедрить поддержку Self-Conditioning (самообусловливания) в процессе обучения (`def forward`) для `DiffusionModelForConditionalGeneration`. Это позволит модели обучаться извлекать выгоду из предсказаний на предыдущем шаге диффузии.
 **Детали:**
-- Добавить флаг `use_self_conditioning` в `DiffusionConfig`.
-- Добавить линейный слой (проекцию) в `DiffusionModelForConditionalGeneration` для проецирования предсказанных логитов (размерности vocab_size) в пространство скрытых состояний (hidden_size).
-- Модифицировать метод `generate`: на каждой итерации сохранять логиты с текущего шага и добавлять их проекцию к `inputs_embeds` на следующем шаге, если `use_self_conditioning=True`.
-- Написать тесты для проверки работы Self-Conditioning, убедившись в корректном влиянии логитов с предыдущего шага на результат генерации.
+- В методе `forward` класса `DiffusionModelForConditionalGeneration` при условии `use_self_conditioning=True` с вероятностью 50% (`torch.rand(1).item() > 0.5`) выполнять предварительный проход без вычисления градиентов (`torch.no_grad()`).
+- В этом предварительном проходе вычислять `prev_logits = outputs.logits`.
+- Затем проецировать `prev_logits` через `self.self_conditioning_proj(torch.softmax(prev_logits, dim=-1))` и добавлять полученные эмбеддинги к `inputs_embeds` для основного прохода, где уже будут считаться градиенты.
+- Написать и обновить тесты в `tests/test_diffusion_self_conditioning.py`.
