@@ -70,3 +70,49 @@ def test_diffusion_no_self_conditioning(mocker):
             break
 
     assert not called_with_embeds, "Forward should not be called with inputs_embeds when use_self_conditioning is False."
+
+def test_diffusion_self_conditioning_training(mocker):
+    config = DiffusionConfig(
+        mask_token_id=0,
+        diffusion_steps=5,
+        base_config_dict={"vocab_size": 100, "hidden_size": 32, "num_hidden_layers": 1, "num_attention_heads": 1, "model_type": "gpt2"},
+        use_self_conditioning=True
+    )
+    model = DiffusionModelForConditionalGeneration(config)
+    model.train() # Make sure model is in training mode
+
+    # We want to force rand() to be > 0.5 to trigger self conditioning
+    mocker.patch("torch.rand", return_value=torch.tensor([0.8]))
+
+    # Spy on the inner_model's forward pass to see if it gets called twice
+    # (Once for the preliminary pass, once for the actual pass)
+    inner_forward_spy = mocker.spy(model.inner_model, "forward")
+
+    input_ids = torch.tensor([[1, 2, 3]])
+    timesteps = torch.tensor([1])
+
+    model(input_ids=input_ids, timesteps=timesteps)
+
+    assert inner_forward_spy.call_count == 2, "Inner model should be called twice when self-conditioning is triggered during training"
+
+def test_diffusion_self_conditioning_training_no_trigger(mocker):
+    config = DiffusionConfig(
+        mask_token_id=0,
+        diffusion_steps=5,
+        base_config_dict={"vocab_size": 100, "hidden_size": 32, "num_hidden_layers": 1, "num_attention_heads": 1, "model_type": "gpt2"},
+        use_self_conditioning=True
+    )
+    model = DiffusionModelForConditionalGeneration(config)
+    model.train()
+
+    # Force rand() to be <= 0.5 to NOT trigger self conditioning
+    mocker.patch("torch.rand", return_value=torch.tensor([0.2]))
+
+    inner_forward_spy = mocker.spy(model.inner_model, "forward")
+
+    input_ids = torch.tensor([[1, 2, 3]])
+    timesteps = torch.tensor([1])
+
+    model(input_ids=input_ids, timesteps=timesteps)
+
+    assert inner_forward_spy.call_count == 1, "Inner model should be called once when self-conditioning is not triggered"
