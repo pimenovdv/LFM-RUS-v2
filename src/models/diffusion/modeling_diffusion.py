@@ -861,6 +861,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         consistency_sampling: bool = False,
         amateur_model: Optional["PreTrainedModel"] = None,
         contrastive_alpha: float = 0.5,
+        mirostat_mode: int = 0,
+        mirostat_tau: float = 5.0,
+        mirostat_eta: float = 0.1,
+        mirostat_mu: Optional[float] = None,
         **kwargs
     ):
         """
@@ -969,6 +973,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
             block_mask_index = (x[:, block_start:block_end] == mask_id)
             num_transfer_tokens = get_num_transfer_tokens(block_mask_index, steps_per_block, schedule=unmasking_schedule)
+
+            current_mirostat_mu = mirostat_mu if mirostat_mu is not None else mirostat_tau * 2.0
 
             for i in range(steps_per_block):
                 if max_time is not None and time.time() - start_time > max_time:
@@ -1851,6 +1857,21 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 if return_dict_in_generate and output_scores:
                     scores.append(logits.clone())
 
+                if mirostat_mode == 1:
+                    original_logits = logits.clone()
+                    probs = F.softmax(logits, dim=-1)
+                    surprise = -torch.log2(probs + 1e-10)
+                    indices_to_remove = surprise > current_mirostat_mu
+
+                    # Protect against masking all tokens
+                    all_masked = indices_to_remove.all(dim=-1, keepdim=True)
+                    if all_masked.any():
+                        # Find the index of the minimum surprise for each sequence
+                        min_surprise_indices = surprise.argmin(dim=-1, keepdim=True)
+                        indices_to_remove = indices_to_remove.scatter(-1, min_surprise_indices, False)
+
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
                 # Check if current_temperature is > 0 (can be a tensor or float)
                 is_temp_positive = (current_gumbel_temperature > 0).any() if isinstance(current_gumbel_temperature, torch.Tensor) else (current_gumbel_temperature > 0)
 
@@ -1865,6 +1886,14 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     logits_with_noise = logits
 
                 x0 = torch.argmax(logits_with_noise, dim=-1)
+
+                if mirostat_mode == 1:
+                    # Calculate surprise based on the original logits, not the masked ones
+                    probs_for_mu = F.softmax(original_logits, dim=-1)
+                    p_x0 = torch.gather(probs_for_mu, -1, x0.unsqueeze(-1)).squeeze(-1)
+                    surprise_x0 = -torch.log2(p_x0 + 1e-10)
+                    mean_surprise = surprise_x0.mean().item()
+                    current_mirostat_mu = current_mirostat_mu - mirostat_eta * (mean_surprise - mirostat_tau)
 
                 if hasattr(self, 'tokenizer') and self.tokenizer is not None:
                     x0 = filter_special_tokens(x0, self.tokenizer, mask_id)
