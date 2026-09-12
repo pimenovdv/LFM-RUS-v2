@@ -865,6 +865,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         mirostat_tau: float = 5.0,
         mirostat_eta: float = 0.1,
         mirostat_mu: Optional[float] = None,
+        cutoff_min_percent: float = 0.0,
+        cutoff_min_percent_schedule: str = "constant",
+        min_cutoff_min_percent: float = 0.0,
         **kwargs
     ):
         """
@@ -1315,6 +1318,25 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 if logit_bias is not None:
                     for token_id, bias in logit_bias.items():
                         logits[:, :, token_id] += bias
+
+                current_cutoff_min_percent = cutoff_min_percent
+                if cutoff_min_percent > 0.0:
+                    if cutoff_min_percent_schedule == "linear":
+                        current_cutoff_min_percent = cutoff_min_percent * (1.0 - step_ratio)
+                    elif cutoff_min_percent_schedule == "cosine":
+                        current_cutoff_min_percent = cutoff_min_percent * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif cutoff_min_percent_schedule == "exponential":
+                        current_cutoff_min_percent = cutoff_min_percent * math.exp(-3.0 * step_ratio)
+                    elif cutoff_min_percent_schedule == "cyclic":
+                        current_cutoff_min_percent = cutoff_min_percent * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_cutoff_min_percent = max(current_cutoff_min_percent, min_cutoff_min_percent)
+
+                if current_cutoff_min_percent > 0.0:
+                    k_to_remove = int(logits.size(-1) * current_cutoff_min_percent)
+                    if k_to_remove > 0:
+                        threshold = torch.kthvalue(logits, k_to_remove, dim=-1, keepdim=True)[0]
+                        indices_to_remove = logits <= threshold
+                        logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
                 if current_top_k > 0:
                     top_k_val = min(max(current_top_k, 1), logits.size(-1))
