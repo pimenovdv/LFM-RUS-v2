@@ -306,3 +306,14 @@ def test_generate_top_a_schedules(mock_diffusion_model):
     assert out.shape == (1, 4)
     out = mock_diffusion_model.generate(input_ids, max_new_tokens=2, top_a=0.5, top_a_schedule="cyclic")
     assert out.shape == (1, 4)
+
+def test_generate_repetition_decay(mock_diffusion_model):
+    input_ids = torch.tensor([[1, 2, 3]])
+    out = mock_diffusion_model.generate(input_ids, max_new_tokens=2, repetition_penalty=2.0, repetition_decay=0.5, repetition_decay_schedule="linear")
+    assert out is not None
+    out = mock_diffusion_model.generate(input_ids, max_new_tokens=2, repetition_penalty=2.0, repetition_decay=0.5, repetition_decay_schedule="cosine")
+    assert out is not None
+    out = mock_diffusion_model.generate(input_ids, max_new_tokens=2, repetition_penalty=2.0, repetition_decay=0.5, repetition_decay_schedule="exponential")
+    assert out is not None
+    out = mock_diffusion_model.generate(input_ids, max_new_tokens=2, repetition_penalty=2.0, repetition_decay=0.5, repetition_decay_schedule="cyclic")
+    assert out is not None

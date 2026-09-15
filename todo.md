@@ -13,7 +13,7 @@
 - В процессе генерации на каждом шаге отсекаются `k` наименее вероятных токенов с использованием `torch.kthvalue`.
 - Написаны тесты в `tests/test_diffusion_cutoff_min_percent.py` для тестирования различных расписаний ("linear", "cosine", "exponential", "cyclic").
 
-## [ ] Шаг 79: Добавление поддержки Repetition Penalization Penalty (RPP) по времени
+## [x] Шаг 79: Добавление поддержки Repetition Penalization Penalty (RPP) по времени
 **Цель:** Добавить поддержку временного штрафа (Decay Penalty) для повторяющихся токенов, где штраф ослабевает со временем (с расстоянием от текущего токена).
 
 ## [ ] Шаг 80: Добавление поддержки DRY (Don't Repeat Yourself) Sampling
