@@ -791,6 +791,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         repetition_penalty: float = 1.0,
         repetition_penalty_schedule: str = "constant",
         min_repetition_penalty: float = 1.0,
+        repetition_decay: float = 0.0,
+        repetition_decay_schedule: str = "constant",
+        min_repetition_decay: float = 0.0,
         frequency_penalty: float = 0.0,
         frequency_penalty_schedule: str = "constant",
         min_frequency_penalty: float = 0.0,
@@ -1448,6 +1451,18 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_repetition_penalty = repetition_penalty * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                 current_repetition_penalty = max(current_repetition_penalty, min_repetition_penalty)
 
+                current_repetition_decay = repetition_decay
+                if repetition_decay != 0.0 and repetition_decay_schedule != "constant":
+                    if repetition_decay_schedule == "linear":
+                        current_repetition_decay = repetition_decay * (1.0 - step_ratio)
+                    elif repetition_decay_schedule == "cosine":
+                        current_repetition_decay = repetition_decay * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif repetition_decay_schedule == "exponential":
+                        current_repetition_decay = repetition_decay * math.exp(-3.0 * step_ratio)
+                    elif repetition_decay_schedule == "cyclic":
+                        current_repetition_decay = repetition_decay * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_repetition_decay = max(current_repetition_decay, min_repetition_decay)
+
                 current_frequency_penalty = frequency_penalty
                 if frequency_penalty != 0.0 and frequency_penalty_schedule != "constant":
                     if frequency_penalty_schedule == "linear":
@@ -1488,7 +1503,18 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                             if current_repetition_penalty != 1.0:
                                 score = logits[b, :, unique_tokens]
-                                penalized_score = torch.where(score < 0, score * current_repetition_penalty, score / current_repetition_penalty)
+                                if current_repetition_decay > 0.0:
+                                    distances = torch.zeros(unique_tokens.numel(), dtype=torch.float32, device=logits.device)
+                                    seq_len = valid_context.numel()
+                                    for i, tok in enumerate(unique_tokens):
+                                        last_idx = (valid_context == tok).nonzero(as_tuple=True)[0][-1]
+                                        distances[i] = seq_len - 1 - last_idx
+
+                                    eff_penalty = 1.0 + (current_repetition_penalty - 1.0) * torch.exp(-current_repetition_decay * distances)
+                                    eff_penalty = eff_penalty.unsqueeze(0)  # Shape: (1, num_unique_tokens) to broadcast with score
+                                    penalized_score = torch.where(score < 0, score * eff_penalty, score / eff_penalty)
+                                else:
+                                    penalized_score = torch.where(score < 0, score * current_repetition_penalty, score / current_repetition_penalty)
                                 logits[b, :, unique_tokens] = penalized_score
 
                             if current_frequency_penalty != 0.0 or current_presence_penalty != 0.0:
@@ -2136,6 +2162,9 @@ class MDLMRequest:
     status: str = "pending"
     result: Optional[torch.Tensor] = None
     transfer_tokens: Optional[torch.Tensor] = None
+    repetition_decay: float = 0.0
+    repetition_decay_schedule: str = "constant"
+    min_repetition_decay: float = 0.0
 
 class MDLMContinuousBatchingManager:
     """
