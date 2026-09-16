@@ -871,6 +871,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         cutoff_min_percent: float = 0.0,
         cutoff_min_percent_schedule: str = "constant",
         min_cutoff_min_percent: float = 0.0,
+        dry_multiplier: float = 0.0,
+        dry_base: float = 1.75,
+        dry_allowed_length: int = 2,
+        dry_sequence_breakers: Optional[list[int]] = None,
         **kwargs
     ):
         """
@@ -1340,6 +1344,65 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         threshold = torch.kthvalue(logits, k_to_remove, dim=-1, keepdim=True)[0]
                         indices_to_remove = logits <= threshold
                         logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                if dry_multiplier > 0.0:
+                    for b in range(batch_size):
+                        seq = x[b, :block_end]
+                        for pos in range(block_start, block_end):
+                            if pos < dry_allowed_length:
+                                continue
+
+                            match_len = dry_allowed_length
+                            target_suffix = seq[pos - match_len : pos]
+
+                            if (target_suffix == mask_id).any():
+                                continue
+
+                            if dry_sequence_breakers is not None:
+                                break_found = False
+                                for br in dry_sequence_breakers:
+                                    if (target_suffix == br).any():
+                                        break_found = True
+                                        break
+                                if break_found:
+                                    continue
+
+                            token_max_match: dict[int, int] = {}
+
+                            # Find matching sub-sequences
+                            # We search up to pos - match_len (exclusive) to avoid matching the target_suffix with itself
+                            for start_idx in range(pos - match_len):
+                                window = seq[start_idx : start_idx + match_len]
+
+                                if not torch.equal(window, target_suffix):
+                                    continue
+
+                                next_token = seq[start_idx + match_len].item()
+                                if next_token == mask_id:
+                                    continue
+
+                                curr_match_len = match_len
+                                while start_idx - (curr_match_len - match_len) > 0 and pos - curr_match_len > 0:
+                                    prev_pos = pos - curr_match_len - 1
+                                    prev_start = start_idx - (curr_match_len - match_len) - 1
+
+                                    tok_prev_start = seq[prev_start].item()
+                                    tok_prev_pos = seq[prev_pos].item()
+
+                                    if tok_prev_start != tok_prev_pos or tok_prev_start == mask_id:
+                                        break
+
+                                    if dry_sequence_breakers is not None and tok_prev_start in dry_sequence_breakers:
+                                        break
+
+                                    curr_match_len += 1
+
+                                token_max_match[next_token] = max(token_max_match.get(next_token, 0), curr_match_len)
+
+                            if token_max_match:
+                                for tok, max_match in token_max_match.items():
+                                    penalty = dry_multiplier * (dry_base ** (max_match - dry_allowed_length))
+                                    logits[b, pos, tok] -= penalty
 
                 if current_top_k > 0:
                     top_k_val = min(max(current_top_k, 1), logits.size(-1))
