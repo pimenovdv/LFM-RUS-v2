@@ -124,6 +124,7 @@ def test_typical_p_sampling(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     # Setup controlled logits output
     mock_out = mocker.MagicMock()
@@ -153,6 +154,7 @@ def test_top_a_sampling(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     mock_out = mocker.MagicMock()
     logits = torch.zeros((1, 4, 10))
@@ -180,6 +182,7 @@ def test_epsilon_cutoff_sampling(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     mock_out = mocker.MagicMock()
     logits = torch.zeros((1, 4, 10))
@@ -206,6 +209,7 @@ def test_eta_cutoff_sampling(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     mock_out = mocker.MagicMock()
     logits = torch.zeros((1, 4, 10))
@@ -232,6 +236,7 @@ def test_tfs_sampling(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     mock_out = mocker.MagicMock()
     logits = torch.zeros((1, 4, 10))
@@ -260,6 +265,7 @@ def test_dynamic_entropy_temperature(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     mock_out = mocker.MagicMock()
     logits = torch.zeros((1, 4, 10))
@@ -286,6 +292,7 @@ def test_generation_parameters(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     mock_out = mocker.MagicMock()
     logits = torch.zeros((1, 4, 10))
@@ -344,6 +351,7 @@ def test_diffusion_model_misc_features(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     # Test disable causal mask
     model._disable_causal_mask()
@@ -406,6 +414,7 @@ def test_min_new_tokens(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=2, diffusion_steps=2)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.ones((1, 2), dtype=torch.long)
     # block_size is 2, min_new_tokens=4, eos_token_id=5
@@ -436,6 +445,7 @@ def test_min_new_tokens_list(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=2, diffusion_steps=2)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.ones((1, 2), dtype=torch.long)
 
@@ -463,6 +473,7 @@ def test_xtc_sampling(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=2, diffusion_steps=2)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.ones((1, 2), dtype=torch.long)
 
@@ -496,6 +507,7 @@ def test_no_repeat_ngram_size(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=1, diffusion_steps=2)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.tensor([[1, 2, 3, 1, 2]])
 
@@ -541,6 +553,7 @@ def test_bad_words_ids(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=1, diffusion_steps=2)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.tensor([[1, 2]])
 
@@ -593,6 +606,7 @@ def test_bad_words_ids_single_token(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=1, diffusion_steps=2)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.tensor([[1, 2]])
 
@@ -637,6 +651,7 @@ def test_max_time(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=4, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -685,6 +700,7 @@ def test_remove_invalid_values(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=1, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -726,6 +742,7 @@ def test_forced_decoder_ids(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=1, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -763,6 +780,7 @@ def test_forced_eos_token_id(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=1, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -797,6 +815,7 @@ def test_forced_eos_token_id_list(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=1, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -831,6 +850,7 @@ def test_renormalize_logits(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=1, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -868,6 +888,7 @@ def test_guidance_rescale_schedule(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -942,6 +963,7 @@ def test_penalty_schedules(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1012,6 +1034,7 @@ def test_generate_time_limit(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1046,6 +1069,7 @@ def test_generate_invalid_logits(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1080,6 +1104,7 @@ def test_generate_extra_kwargs(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1114,6 +1139,7 @@ def test_generate_cfg_schedules(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1151,6 +1177,7 @@ def test_generate_tkg_schedules(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1184,6 +1211,7 @@ def test_generate_steer_vector(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1218,6 +1246,7 @@ def test_generate_other_schedules(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1257,6 +1286,7 @@ def test_generate_min_new_tokens(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1290,6 +1320,7 @@ def test_generate_bad_words(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1322,6 +1353,7 @@ def test_generate_linear_schedules_coverage(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1375,6 +1407,7 @@ def test_generate_exponential_schedules_coverage(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1700,6 +1733,7 @@ def test_generate_logits_processor(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1742,6 +1776,7 @@ def test_generate_stopping_criteria(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=5, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1781,6 +1816,7 @@ def test_generate_begin_suppress_tokens(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=2, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -1888,6 +1924,7 @@ def test_remasking_entropy(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.tensor([[1, 2]])
 
@@ -1920,6 +1957,7 @@ def test_gumbel_temperature(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.tensor([[1, 2]])
 
@@ -1969,6 +2007,7 @@ def test_diffusion_extra_coverage(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=3, block_size=1, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.tensor([[1, 2]])
 
@@ -2005,6 +2044,7 @@ def test_ngram_penalty(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=1, diffusion_steps=1)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.tensor([[1, 2, 3, 1, 2]])
 
@@ -2073,6 +2113,7 @@ def test_temperature_mask(mocker):
     config = DiffusionConfig(base_config_dict={"hidden_size": 12, "vocab_size": 10}, timestep_dim=8, mask_token_id=0, max_timesteps=10, block_size=2, diffusion_steps=1)
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.tensor([[1, 2]])
     temp_mask = torch.tensor([[1.0, 0.0]])
@@ -2177,6 +2218,7 @@ def test_generate_use_kv_cache_raises_error(mocker):
     config = DiffusionConfig(mask_token_id=0, diffusion_steps=2, block_size=2, vocab_size=10, base_config_dict={"hidden_size": 12, "vocab_size": 10})
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
     model.eval()
 
     input_ids = torch.tensor([[1, 2]])
@@ -2321,6 +2363,7 @@ def test_consistency_sampling(mocker):
     )
     model = DiffusionModelForConditionalGeneration(config)
     model.lm_head = torch.nn.Linear(12, 10, bias=False)
+    model.self_conditioning_proj = torch.nn.Linear(10, 12, bias=False)
 
     input_ids = torch.tensor([[1, 2]])
 
