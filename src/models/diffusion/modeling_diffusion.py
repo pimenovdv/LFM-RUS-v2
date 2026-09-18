@@ -872,6 +872,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         cutoff_min_percent_schedule: str = "constant",
         min_cutoff_min_percent: float = 0.0,
         dry_multiplier: float = 0.0,
+        dry_multiplier_schedule: str = "constant",
+        min_dry_multiplier: float = 0.0,
         dry_base: float = 1.75,
         dry_allowed_length: int = 2,
         dry_sequence_breakers: Optional[list[int]] = None,
@@ -1345,7 +1347,19 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         indices_to_remove = logits <= threshold
                         logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                current_dry_multiplier = dry_multiplier
                 if dry_multiplier > 0.0:
+                    if dry_multiplier_schedule == "linear":
+                        current_dry_multiplier = dry_multiplier * (1.0 - step_ratio)
+                    elif dry_multiplier_schedule == "cosine":
+                        current_dry_multiplier = dry_multiplier * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif dry_multiplier_schedule == "exponential":
+                        current_dry_multiplier = dry_multiplier * math.exp(-3.0 * step_ratio)
+                    elif dry_multiplier_schedule == "cyclic":
+                        current_dry_multiplier = dry_multiplier * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_dry_multiplier = max(current_dry_multiplier, min_dry_multiplier)
+
+                if current_dry_multiplier > 0.0:
                     for b in range(batch_size):
                         seq = x[b, :block_end]
                         for pos in range(block_start, block_end):
@@ -1401,7 +1415,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                             if token_max_match:
                                 for tok, max_match in token_max_match.items():
-                                    penalty = dry_multiplier * (dry_base ** (max_match - dry_allowed_length))
+                                    penalty = current_dry_multiplier * (dry_base ** (max_match - dry_allowed_length))
                                     logits[b, pos, tok] -= penalty
 
                 if current_top_k > 0:
