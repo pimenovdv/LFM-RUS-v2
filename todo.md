@@ -14,12 +14,12 @@
 **Детали:**
 - Добавление расписаний для Min-P Sampling позволит динамически управлять порогом отсечения токенов на разных этапах генерации.
 
-## [ ] Шаг 82: Добавление расписаний для Top-K Guidance (tkg_schedule)
+## [x] Шаг 82: Добавление расписаний для Top-K Guidance (tkg_schedule)
 **Цель:** Добавить поддержку динамических расписаний (linear, cosine, exponential, cyclic) для `tkg_scale` (Top-K Guidance).
 **Детали:**
 - В `generate` добавить логику изменения `tkg_scale` в зависимости от шага. Это позволит контролировать силу наведения по Top-K на разных этапах генерации (например, уменьшать к концу генерации для большей креативности).
 
-## [ ] Шаг 83: Добавление расписаний для XTC (Exclude Top Choices) Sampling
+## [x] Шаг 83: Добавление расписаний для XTC (Exclude Top Choices) Sampling
 **Цель:** Внедрить расписания `xtc_threshold_schedule` и `xtc_probability_schedule` для XTC Sampling.
 **Детали:**
 - XTC Sampling исключает наиболее вероятные токены. Добавление расписаний (linear, cosine, exponential, cyclic) для порога отсечения и вероятности применения позволит динамически изменять агрессивность XTC Sampling в процессе генерации.
@@ -28,3 +28,11 @@
 **Цель:** Добавить поддержку динамических расписаний (linear, cosine, exponential, cyclic) для `dry_multiplier`.
 **Детали:**
 - Добавление расписания для `dry_multiplier` позволит динамически управлять силой штрафования за повторение длинных последовательностей в процессе генерации.
+
+## [x] Шаг 85: Добавление расписаний для Mirostat Sampling
+**Цель:** Добавить поддержку динамических расписаний (linear, cosine, exponential, cyclic) для `mirostat_tau` и `mirostat_eta` в алгоритме Mirostat.
+**Детали:**
+- В алгоритме Mirostat используются параметры `mirostat_tau` (целевая энтропия) и `mirostat_eta` (скорость обучения).
+- Добавить параметры `mirostat_tau_schedule`, `min_mirostat_tau` и `mirostat_eta_schedule`, `min_mirostat_eta` в метод `generate`.
+- Внутри цикла `steps`, обновлять `current_mirostat_tau` и `current_mirostat_eta` в зависимости от `step_ratio` (так же как это делается для `temperature` и других параметров).
+- Это позволит управлять тем, насколько быстро Mirostat реагирует на неожиданность (surprisal) на разных этапах генерации (например, увеличивая целевую энтропию в конце или меняя learning rate).

@@ -41,3 +41,30 @@ def test_diffusion_mirostat(mocker):
     )
 
     assert output_mu.shape == (1, 8)
+
+def test_diffusion_mirostat_schedules(mocker):
+    config = DiffusionConfig(
+        mask_token_id=0,
+        diffusion_steps=5,
+        base_config_dict={"vocab_size": 100, "hidden_size": 32, "num_hidden_layers": 1, "num_attention_heads": 1, "model_type": "gpt2"},
+    )
+    model = DiffusionModelForConditionalGeneration(config)
+
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    schedules = ["linear", "cosine", "exponential", "cyclic"]
+
+    for schedule in schedules:
+        output = model.generate(
+            input_ids=input_ids,
+            max_new_tokens=5,
+            steps=5,
+            mirostat_mode=1,
+            mirostat_tau=5.0,
+            mirostat_tau_schedule=schedule,
+            min_mirostat_tau=1.0,
+            mirostat_eta=0.1,
+            mirostat_eta_schedule=schedule,
+            min_mirostat_eta=0.01
+        )
+        assert output.shape == (1, 8)
