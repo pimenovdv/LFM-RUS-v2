@@ -866,7 +866,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         contrastive_alpha: float = 0.5,
         mirostat_mode: int = 0,
         mirostat_tau: float = 5.0,
+        mirostat_tau_schedule: str = "constant",
+        min_mirostat_tau: float = 0.0,
         mirostat_eta: float = 0.1,
+        mirostat_eta_schedule: str = "constant",
+        min_mirostat_eta: float = 0.0,
         mirostat_mu: Optional[float] = None,
         cutoff_min_percent: float = 0.0,
         cutoff_min_percent_schedule: str = "constant",
@@ -1982,6 +1986,29 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 if return_dict_in_generate and output_scores:
                     scores.append(logits.clone())
 
+                current_mirostat_tau = mirostat_tau
+                current_mirostat_eta = mirostat_eta
+                if mirostat_mode > 0:
+                    if mirostat_tau_schedule == "linear":
+                        current_mirostat_tau = mirostat_tau * (1.0 - step_ratio)
+                    elif mirostat_tau_schedule == "cosine":
+                        current_mirostat_tau = mirostat_tau * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif mirostat_tau_schedule == "exponential":
+                        current_mirostat_tau = mirostat_tau * math.exp(-3.0 * step_ratio)
+                    elif mirostat_tau_schedule == "cyclic":
+                        current_mirostat_tau = mirostat_tau * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_mirostat_tau = max(current_mirostat_tau, min_mirostat_tau)
+
+                    if mirostat_eta_schedule == "linear":
+                        current_mirostat_eta = mirostat_eta * (1.0 - step_ratio)
+                    elif mirostat_eta_schedule == "cosine":
+                        current_mirostat_eta = mirostat_eta * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif mirostat_eta_schedule == "exponential":
+                        current_mirostat_eta = mirostat_eta * math.exp(-3.0 * step_ratio)
+                    elif mirostat_eta_schedule == "cyclic":
+                        current_mirostat_eta = mirostat_eta * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_mirostat_eta = max(current_mirostat_eta, min_mirostat_eta)
+
                 if mirostat_mode == 1:
                     original_logits = logits.clone()
                     probs = F.softmax(logits, dim=-1)
@@ -2018,7 +2045,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     p_x0 = torch.gather(probs_for_mu, -1, x0.unsqueeze(-1)).squeeze(-1)
                     surprise_x0 = -torch.log2(p_x0 + 1e-10)
                     mean_surprise = surprise_x0.mean().item()
-                    current_mirostat_mu = current_mirostat_mu - mirostat_eta * (mean_surprise - mirostat_tau)
+                    current_mirostat_mu = current_mirostat_mu - current_mirostat_eta * (mean_surprise - current_mirostat_tau)
 
                 if hasattr(self, 'tokenizer') and self.tokenizer is not None:
                     x0 = filter_special_tokens(x0, self.tokenizer, mask_id)
