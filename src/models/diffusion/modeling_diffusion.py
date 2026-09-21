@@ -811,6 +811,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         xtc_probability: float = 0.0,
         xtc_probability_schedule: str = "constant",
         min_xtc_probability: float = 0.0,
+        logits_momentum: float = 0.0,
+        logits_momentum_schedule: str = "constant",
+        min_logits_momentum: float = 0.0,
         tkg_scale: float = 0.0,
         tkg_schedule: str = "constant",
         tkg_min_scale: float = 0.0,
@@ -980,6 +983,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         retrieved_len = 0
 
+        running_logits = None
+
         for num_block in range(num_blocks):
             if max_time is not None and time.time() - start_time > max_time:
                 break
@@ -1130,6 +1135,31 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         control_scale=control_scale
                     )
                 logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+
+                if logits_momentum > 0.0:
+                    current_logits_momentum = logits_momentum
+                    if logits_momentum_schedule == "linear":
+                        current_logits_momentum = logits_momentum * (1.0 - step_ratio)
+                    elif logits_momentum_schedule == "cosine":
+                        current_logits_momentum = logits_momentum * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif logits_momentum_schedule == "exponential":
+                        current_logits_momentum = logits_momentum * math.exp(-3.0 * step_ratio)
+                    elif logits_momentum_schedule == "cyclic":
+                        current_logits_momentum = logits_momentum * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_logits_momentum = max(current_logits_momentum, min_logits_momentum)
+
+                    if current_logits_momentum > 0.0:
+                        if running_logits is None:
+                            running_logits = logits.clone().detach()
+                        else:
+                            if running_logits.size(1) < logits.size(1):
+                                pad_len = logits.size(1) - running_logits.size(1)
+                                pad_tensor = torch.zeros((running_logits.size(0), pad_len, running_logits.size(2)), device=running_logits.device, dtype=running_logits.dtype)
+                                running_logits = torch.cat([running_logits, pad_tensor], dim=1)
+                            elif running_logits.size(1) > logits.size(1):
+                                running_logits = running_logits[:, :logits.size(1), :]
+                            logits = current_logits_momentum * running_logits + (1.0 - current_logits_momentum) * logits
+                            running_logits = logits.clone().detach()
 
                 if getattr(self.config, "use_self_conditioning", False):
                     prev_logits = logits.detach()
@@ -2269,6 +2299,15 @@ class MDLMRequest:
     repetition_decay: float = 0.0
     repetition_decay_schedule: str = "constant"
     min_repetition_decay: float = 0.0
+    logits_momentum: float = 0.0
+    logits_momentum_schedule: str = "constant"
+    min_logits_momentum: float = 0.0
+    running_logits: Optional[torch.Tensor] = None
+
+    def __eq__(self, other):
+        if not isinstance(other, MDLMRequest):
+            return False
+        return self.request_id == other.request_id
 
 class MDLMContinuousBatchingManager:
     """
@@ -2354,6 +2393,32 @@ class MDLMContinuousBatchingManager:
         for i, req in enumerate(self.active_requests):
             req_len = req.x.size(1)
             req_logits = logits[i:i+1, :req_len, :]
+
+            if req.logits_momentum > 0.0:
+                step_ratio = req.current_step / max(1, req.total_steps - 1) if req.total_steps > 1 else 0.0
+                current_logits_momentum = req.logits_momentum
+                if req.logits_momentum_schedule == "linear":
+                    current_logits_momentum = req.logits_momentum * (1.0 - step_ratio)
+                elif req.logits_momentum_schedule == "cosine":
+                    current_logits_momentum = req.logits_momentum * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.logits_momentum_schedule == "exponential":
+                    current_logits_momentum = req.logits_momentum * math.exp(-3.0 * step_ratio)
+                elif req.logits_momentum_schedule == "cyclic":
+                    current_logits_momentum = req.logits_momentum * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_logits_momentum = max(current_logits_momentum, req.min_logits_momentum)
+
+                if current_logits_momentum > 0.0:
+                    if req.running_logits is None:
+                        req.running_logits = req_logits.clone().detach()
+                    else:
+                        if req.running_logits.size(1) < req_logits.size(1):
+                            pad_len = req_logits.size(1) - req.running_logits.size(1)
+                            pad_tensor = torch.zeros((req.running_logits.size(0), pad_len, req.running_logits.size(2)), device=req.running_logits.device, dtype=req.running_logits.dtype)
+                            req.running_logits = torch.cat([req.running_logits, pad_tensor], dim=1)
+                        elif req.running_logits.size(1) > req_logits.size(1):
+                            req.running_logits = req.running_logits[:, :req_logits.size(1), :]
+                        req_logits = current_logits_momentum * req.running_logits + (1.0 - current_logits_momentum) * req_logits
+                        req.running_logits = req_logits.clone().detach()
 
             M = req.transfer_tokens[0, req.current_step].item()
 
