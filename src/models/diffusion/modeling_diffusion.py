@@ -814,6 +814,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         logits_momentum: float = 0.0,
         logits_momentum_schedule: str = "constant",
         min_logits_momentum: float = 0.0,
+        gaussian_noise_std: float = 0.0,
+        gaussian_noise_schedule: str = "constant",
+        min_gaussian_noise_std: float = 0.0,
         tkg_scale: float = 0.0,
         tkg_schedule: str = "constant",
         tkg_min_scale: float = 0.0,
@@ -1160,6 +1163,21 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                 running_logits = running_logits[:, :logits.size(1), :]
                             logits = current_logits_momentum * running_logits + (1.0 - current_logits_momentum) * logits
                             running_logits = logits.clone().detach()
+
+                if gaussian_noise_std > 0.0:
+                    current_gaussian_noise_std = gaussian_noise_std
+                    if gaussian_noise_schedule == "linear":
+                        current_gaussian_noise_std = gaussian_noise_std * (1.0 - step_ratio)
+                    elif gaussian_noise_schedule == "cosine":
+                        current_gaussian_noise_std = gaussian_noise_std * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif gaussian_noise_schedule == "exponential":
+                        current_gaussian_noise_std = gaussian_noise_std * math.exp(-3.0 * step_ratio)
+                    elif gaussian_noise_schedule == "cyclic":
+                        current_gaussian_noise_std = gaussian_noise_std * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_gaussian_noise_std = max(current_gaussian_noise_std, min_gaussian_noise_std)
+
+                    if current_gaussian_noise_std > 0.0:
+                        logits = logits + torch.randn_like(logits) * current_gaussian_noise_std
 
                 if getattr(self.config, "use_self_conditioning", False):
                     prev_logits = logits.detach()
@@ -2303,6 +2321,9 @@ class MDLMRequest:
     logits_momentum_schedule: str = "constant"
     min_logits_momentum: float = 0.0
     running_logits: Optional[torch.Tensor] = None
+    gaussian_noise_std: float = 0.0
+    gaussian_noise_schedule: str = "constant"
+    min_gaussian_noise_std: float = 0.0
 
     def __eq__(self, other):
         if not isinstance(other, MDLMRequest):
@@ -2419,6 +2440,22 @@ class MDLMContinuousBatchingManager:
                             req.running_logits = req.running_logits[:, :req_logits.size(1), :]
                         req_logits = current_logits_momentum * req.running_logits + (1.0 - current_logits_momentum) * req_logits
                         req.running_logits = req_logits.clone().detach()
+
+            if req.gaussian_noise_std > 0.0:
+                step_ratio = req.current_step / max(1, req.total_steps - 1) if req.total_steps > 1 else 0.0
+                current_gaussian_noise_std = req.gaussian_noise_std
+                if req.gaussian_noise_schedule == "linear":
+                    current_gaussian_noise_std = req.gaussian_noise_std * (1.0 - step_ratio)
+                elif req.gaussian_noise_schedule == "cosine":
+                    current_gaussian_noise_std = req.gaussian_noise_std * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.gaussian_noise_schedule == "exponential":
+                    current_gaussian_noise_std = req.gaussian_noise_std * math.exp(-3.0 * step_ratio)
+                elif req.gaussian_noise_schedule == "cyclic":
+                    current_gaussian_noise_std = req.gaussian_noise_std * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_gaussian_noise_std = max(current_gaussian_noise_std, req.min_gaussian_noise_std)
+
+                if current_gaussian_noise_std > 0.0:
+                    req_logits = req_logits + torch.randn_like(req_logits) * current_gaussian_noise_std
 
             M = req.transfer_tokens[0, req.current_step].item()
 
