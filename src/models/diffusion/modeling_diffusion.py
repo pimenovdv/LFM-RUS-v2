@@ -2324,6 +2324,15 @@ class MDLMRequest:
     gaussian_noise_std: float = 0.0
     gaussian_noise_schedule: str = "constant"
     min_gaussian_noise_std: float = 0.0
+    top_k: int = 0
+    top_k_schedule: str = "constant"
+    min_top_k: int = 0
+    top_p: float = 1.0
+    top_p_schedule: str = "constant"
+    min_top_p: float = 0.0
+    min_p: float = 0.0
+    min_p_schedule: str = "constant"
+    min_min_p: float = 0.0
 
     def __eq__(self, other):
         if not isinstance(other, MDLMRequest):
@@ -2415,8 +2424,9 @@ class MDLMContinuousBatchingManager:
             req_len = req.x.size(1)
             req_logits = logits[i:i+1, :req_len, :]
 
+            step_ratio = req.current_step / max(1, req.total_steps - 1) if req.total_steps > 1 else 0.0
+
             if req.logits_momentum > 0.0:
-                step_ratio = req.current_step / max(1, req.total_steps - 1) if req.total_steps > 1 else 0.0
                 current_logits_momentum = req.logits_momentum
                 if req.logits_momentum_schedule == "linear":
                     current_logits_momentum = req.logits_momentum * (1.0 - step_ratio)
@@ -2442,7 +2452,6 @@ class MDLMContinuousBatchingManager:
                         req.running_logits = req_logits.clone().detach()
 
             if req.gaussian_noise_std > 0.0:
-                step_ratio = req.current_step / max(1, req.total_steps - 1) if req.total_steps > 1 else 0.0
                 current_gaussian_noise_std = req.gaussian_noise_std
                 if req.gaussian_noise_schedule == "linear":
                     current_gaussian_noise_std = req.gaussian_noise_std * (1.0 - step_ratio)
@@ -2459,10 +2468,71 @@ class MDLMContinuousBatchingManager:
 
             M = req.transfer_tokens[0, req.current_step].item()
 
+            current_top_k = req.top_k
+            if req.top_k > 0:
+                if req.top_k_schedule == "linear":
+                    current_top_k = int(req.top_k * (1.0 - step_ratio))
+                elif req.top_k_schedule == "cosine":
+                    current_top_k = int(req.top_k * 0.5 * (1.0 + math.cos(math.pi * step_ratio)))
+                elif req.top_k_schedule == "exponential":
+                    current_top_k = int(req.top_k * math.exp(-3.0 * step_ratio))
+                elif req.top_k_schedule == "cyclic":
+                    current_top_k = int(req.top_k * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio)))
+                current_top_k = max(current_top_k, req.min_top_k)
+
+            if current_top_k > 0:
+                top_k_vals, _ = torch.topk(req_logits, min(current_top_k, req_logits.size(-1)))
+                indices_to_remove = req_logits < top_k_vals[..., -1, None]
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_top_p = req.top_p
+            if req.top_p < 1.0:
+                if req.top_p_schedule == "linear":
+                    current_top_p = req.top_p * (1.0 - step_ratio)
+                elif req.top_p_schedule == "cosine":
+                    current_top_p = req.top_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.top_p_schedule == "exponential":
+                    current_top_p = req.top_p * math.exp(-3.0 * step_ratio)
+                elif req.top_p_schedule == "cyclic":
+                    current_top_p = req.top_p * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_top_p = max(current_top_p, req.min_top_p)
+
+            if current_top_p < 1.0:
+                sorted_logits, sorted_indices = torch.sort(req_logits, descending=True)
+                cumulative_probs = torch.cumsum(F.softmax(sorted_logits, dim=-1), dim=-1)
+                sorted_indices_to_remove = cumulative_probs > current_top_p
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+                indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_min_p = req.min_p
+            if req.min_p > 0.0:
+                if req.min_p_schedule == "linear":
+                    current_min_p = req.min_p * (1.0 - step_ratio)
+                elif req.min_p_schedule == "cosine":
+                    current_min_p = req.min_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.min_p_schedule == "exponential":
+                    current_min_p = req.min_p * math.exp(-3.0 * step_ratio)
+                elif req.min_p_schedule == "cyclic":
+                    current_min_p = req.min_p * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_min_p = max(current_min_p, req.min_min_p)
+
+            if current_min_p > 0.0:
+                probs = F.softmax(req_logits, dim=-1)
+                max_probs, _ = probs.max(dim=-1, keepdim=True)
+                thresholds = max_probs * current_min_p
+                indices_to_remove = probs < thresholds
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
             if req.temperature > 0:
                 req_logits = req_logits / req.temperature
-
-            x0 = torch.argmax(req_logits, dim=-1)
+                probs = F.softmax(req_logits, dim=-1)
+                # Reshape for multinomial: (batch * seq_len, vocab_size)
+                reshaped_probs = probs.view(-1, probs.size(-1))
+                x0 = torch.multinomial(reshaped_probs, num_samples=1).view(probs.size(0), probs.size(1))
+            else:
+                x0 = torch.argmax(req_logits, dim=-1)
 
             p = F.softmax(req_logits.to(torch.float64), dim=-1)
             x0_p = torch.squeeze(torch.gather(p, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
