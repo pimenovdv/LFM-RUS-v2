@@ -81,3 +81,68 @@ def test_continuous_batching_temperature_sampling(mocker):
     assert len(results) == 2
     assert results[0] is not None
     assert results[1] is not None
+import torch
+from tests.test_diffusion_continuous_batching_sampling import get_mock_model
+
+def test_coverage(mocker):
+    model = get_mock_model(mocker)
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_k": 5, "top_k_schedule": "cosine"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_k": 5, "top_k_schedule": "exponential"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_k": 5, "top_k_schedule": "cyclic"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_p": 0.5, "top_p_schedule": "linear"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_p": 0.5, "top_p_schedule": "exponential"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_p": 0.5, "top_p_schedule": "cyclic"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "min_p": 0.5, "min_p_schedule": "linear"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "min_p": 0.5, "min_p_schedule": "cosine"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "min_p": 0.5, "min_p_schedule": "cyclic"}
+    ]
+    model.generate_dynamic_batch(requests)
+
+def test_continuous_batching_typical_p(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "typical_p": 0.5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "typical_p": 0.5, "typical_p_schedule": "linear", "min_typical_p": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "typical_p": 0.5, "typical_p_schedule": "cosine", "min_typical_p": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "typical_p": 0.5, "typical_p_schedule": "exponential", "min_typical_p": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "typical_p": 0.5, "typical_p_schedule": "cyclic", "min_typical_p": 0.1}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 5
+    for res in results:
+        assert res is not None
+
+def test_continuous_batching_tfs(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "tfs": 0.5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "tfs": 0.5, "tfs_schedule": "linear", "min_tfs": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "tfs": 0.5, "tfs_schedule": "cosine", "min_tfs": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "tfs": 0.5, "tfs_schedule": "exponential", "min_tfs": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "tfs": 0.5, "tfs_schedule": "cyclic", "min_tfs": 0.1}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 5
+    for res in results:
+        assert res is not None
+
+def test_continuous_batching_top_a(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_a": 0.5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_a": 0.5, "top_a_schedule": "linear", "min_top_a": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_a": 0.5, "top_a_schedule": "cosine", "min_top_a": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_a": 0.5, "top_a_schedule": "exponential", "min_top_a": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_a": 0.5, "top_a_schedule": "cyclic", "min_top_a": 0.1}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 5
+    for res in results:
+        assert res is not None

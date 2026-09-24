@@ -2333,6 +2333,15 @@ class MDLMRequest:
     min_p: float = 0.0
     min_p_schedule: str = "constant"
     min_min_p: float = 0.0
+    typical_p: float = 1.0
+    typical_p_schedule: str = "constant"
+    min_typical_p: float = 0.0
+    tfs: float = 1.0
+    tfs_schedule: str = "constant"
+    min_tfs: float = 0.0
+    top_a: float = 0.0
+    top_a_schedule: str = "constant"
+    min_top_a: float = 0.0
 
     def __eq__(self, other):
         if not isinstance(other, MDLMRequest):
@@ -2523,6 +2532,88 @@ class MDLMContinuousBatchingManager:
                 max_probs, _ = probs.max(dim=-1, keepdim=True)
                 thresholds = max_probs * current_min_p
                 indices_to_remove = probs < thresholds
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_typical_p = req.typical_p
+            if req.typical_p < 1.0:
+                if req.typical_p_schedule == "linear":
+                    current_typical_p = req.typical_p * (1.0 - step_ratio)
+                elif req.typical_p_schedule == "cosine":
+                    current_typical_p = req.typical_p * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.typical_p_schedule == "exponential":
+                    current_typical_p = req.typical_p * math.exp(-3.0 * step_ratio)
+                elif req.typical_p_schedule == "cyclic":
+                    current_typical_p = req.typical_p * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_typical_p = max(current_typical_p, req.min_typical_p)
+
+            if current_typical_p < 1.0:
+                probs = F.softmax(req_logits, dim=-1)
+                entropy = -torch.sum(probs * torch.log(probs + 1e-10), dim=-1, keepdim=True)
+                shifted_scores = torch.abs(-torch.log(probs + 1e-10) - entropy)
+                sorted_shifted_scores, sorted_indices = torch.sort(shifted_scores, descending=False)
+                sorted_probs = probs.gather(-1, sorted_indices)
+                cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+                sorted_indices_to_remove = cumulative_probs > current_typical_p
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+
+                indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_tfs = req.tfs
+            if req.tfs < 1.0 or req.min_tfs < 1.0:
+                if req.tfs_schedule == "linear":
+                    current_tfs = req.tfs + (req.min_tfs - req.tfs) * step_ratio
+                elif req.tfs_schedule == "cosine":
+                    current_tfs = req.min_tfs + (req.tfs - req.min_tfs) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.tfs_schedule == "exponential":
+                    current_tfs = req.min_tfs + (req.tfs - req.min_tfs) * math.exp(-3.0 * step_ratio)
+                elif req.tfs_schedule == "cyclic":
+                    current_tfs = req.min_tfs + (req.tfs - req.min_tfs) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_tfs = max(min(current_tfs, max(req.tfs, req.min_tfs)), min(req.tfs, req.min_tfs))
+
+            if (req.tfs < 1.0 or req.min_tfs < 1.0) and current_tfs < 1.0:
+                probs = F.softmax(req_logits, dim=-1)
+                sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+
+                first_deriv = sorted_probs[..., :-1] - sorted_probs[..., 1:]
+                second_deriv = first_deriv[..., :-1] - first_deriv[..., 1:]
+
+                pad_zeros = torch.zeros((*second_deriv.shape[:-1], 2), device=second_deriv.device, dtype=second_deriv.dtype)
+                second_deriv = torch.cat([second_deriv, pad_zeros], dim=-1)
+
+                abs_second_deriv = torch.abs(second_deriv)
+                sum_abs_second_deriv = torch.sum(abs_second_deriv, dim=-1, keepdim=True)
+                sum_abs_second_deriv = torch.clamp(sum_abs_second_deriv, min=1e-9)
+
+                normalized_second_deriv = abs_second_deriv / sum_abs_second_deriv
+                cumulative_probs = torch.cumsum(normalized_second_deriv, dim=-1)
+
+                sorted_indices_to_remove = cumulative_probs > current_tfs
+                sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
+                sorted_indices_to_remove[..., 0] = 0
+
+                indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_top_a = req.top_a
+            if req.top_a > 0.0:
+                if req.top_a_schedule == "linear":
+                    current_top_a = req.top_a * (1.0 - step_ratio)
+                elif req.top_a_schedule == "cosine":
+                    current_top_a = req.top_a * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.top_a_schedule == "exponential":
+                    current_top_a = req.top_a * math.exp(-3.0 * step_ratio)
+                elif req.top_a_schedule == "cyclic":
+                    current_top_a = req.top_a * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_top_a = max(current_top_a, req.min_top_a)
+
+            if current_top_a > 0.0:
+                probs = F.softmax(req_logits, dim=-1)
+                max_probs = probs.max(dim=-1, keepdim=True).values
+                limit = current_top_a * (max_probs ** 2)
+                indices_to_remove = probs < limit
                 req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
 
             if req.temperature > 0:
