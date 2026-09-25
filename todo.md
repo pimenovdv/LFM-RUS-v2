@@ -2,14 +2,14 @@
 
 Этот документ содержит пошаговый план разработки для интеграции маскированной дискретной диффузии в существующий пайплайн обучения.
 
-## [x] Завершенные этапы (Шаги 1-88)
+## [x] Завершенные этапы (Шаги 1-89)
 **Сжатое описание:**
-Реализована полнофункциональная интеграция MDLM, включая базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, Mixture of Experts (MoE), Retrieval-Augmented Generation (RAG), Continuous Time Diffusion, дистилляцию консистентности, Latent Masked Diffusion, Discrete Flow Matching, Contrastive Decoding, Mirostat Sampling, DRY Sampling, Min-K% Prob Sampling, XTC Sampling, а также интеграцию различных вероятностных фильтров (Top-K, Top-P, Min-P, сглаживание логитов, добавление гауссовского шума) в механизм Continuous Batching.
+Реализована полнофункциональная интеграция MDLM, включая базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, Mixture of Experts (MoE), Retrieval-Augmented Generation (RAG), Continuous Time Diffusion, дистилляцию консистентности, Latent Masked Diffusion, Discrete Flow Matching, Contrastive Decoding, Mirostat Sampling, DRY Sampling, Min-K% Prob Sampling, XTC Sampling, а также интеграцию различных вероятностных фильтров (Top-K, Top-P, Min-P, сглаживание логитов, добавление гауссовского шума, Typical Sampling, TFS, Top-A) в механизм Continuous Batching.
 
-## [x] Шаг 89: Поддержка Typical Sampling, Tail Free Sampling (TFS) и Top-A фильтров в Continuous Batching
-**Цель:** Добавить поддержку вероятностных фильтров Typical Sampling, Tail Free Sampling (TFS) и Top-A для режима Continuous Batching.
+## [x] Шаг 90: Поддержка Epsilon Cutoff, Eta Cutoff, Top-N Tokens и Mirostat Sampling фильтров в Continuous Batching
+**Цель:** Добавить поддержку дополнительных вероятностных фильтров (Epsilon Cutoff, Eta Cutoff, Top-N Tokens и Mirostat Sampling) для режима Continuous Batching в MDLM.
 **Детали:**
-- В класс `MDLMRequest` добавить параметры `typical_p`, `typical_p_schedule`, `min_typical_p`, `tfs`, `tfs_schedule`, `min_tfs`, `top_a`, `top_a_schedule`, `min_top_a`.
-- В методе `MDLMContinuousBatchingManager.step` рассчитывать их текущие значения на основе шага (`step_ratio`).
-- Применять фильтры Typical Sampling, TFS и Top-A к логитам запроса (заменяя отфильтрованные значения на `-inf`), следуя алгоритмам, уже реализованным в основном методе `generate`.
-- Написать тесты для проверки корректности применения Typical Sampling, TFS и Top-A в Continuous Batching.
+- В класс `MDLMRequest` добавить параметры для `epsilon_cutoff`, `eta_cutoff`, `top_n_tokens`, `mirostat_mode`, `mirostat_tau`, `mirostat_eta`, `mirostat_mu` и их расписаний.
+- В методе `MDLMContinuousBatchingManager.step` рассчитывать текущие значения параметров и применять соответствующие фильтры к логитам, следуя алгоритмам из основного метода `generate`.
+- Обновлять `mirostat_mu` после выбора токена, если `mirostat_mode > 0`.
+- Написать тесты для проверки корректности работы Epsilon Cutoff, Eta Cutoff, Top-N Tokens и Mirostat Sampling в Continuous Batching.

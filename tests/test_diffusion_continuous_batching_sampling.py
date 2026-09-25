@@ -115,6 +115,70 @@ def test_continuous_batching_typical_p(mocker):
     for res in results:
         assert res is not None
 
+def test_continuous_batching_epsilon_cutoff(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "epsilon_cutoff": 0.05},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "epsilon_cutoff": 0.05, "epsilon_cutoff_schedule": "linear", "min_epsilon_cutoff": 0.01},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "epsilon_cutoff": 0.05, "epsilon_cutoff_schedule": "cosine", "min_epsilon_cutoff": 0.01},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "epsilon_cutoff": 0.05, "epsilon_cutoff_schedule": "exponential", "min_epsilon_cutoff": 0.01},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "epsilon_cutoff": 0.05, "epsilon_cutoff_schedule": "cyclic", "min_epsilon_cutoff": 0.01}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 5
+    for res in results:
+        assert res is not None
+
+def test_continuous_batching_eta_cutoff(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "eta_cutoff": 0.05},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "eta_cutoff": 0.05, "eta_cutoff_schedule": "linear", "min_eta_cutoff": 0.01},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "eta_cutoff": 0.05, "eta_cutoff_schedule": "cosine", "min_eta_cutoff": 0.01},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "eta_cutoff": 0.05, "eta_cutoff_schedule": "exponential", "min_eta_cutoff": 0.01},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "eta_cutoff": 0.05, "eta_cutoff_schedule": "cyclic", "min_eta_cutoff": 0.01}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 5
+    for res in results:
+        assert res is not None
+
+def test_continuous_batching_top_n_tokens(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_n_tokens": 5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_n_tokens": 10, "top_n_tokens_schedule": "linear", "min_top_n_tokens": 2},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_n_tokens": 10, "top_n_tokens_schedule": "cosine", "min_top_n_tokens": 2},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_n_tokens": 10, "top_n_tokens_schedule": "exponential", "min_top_n_tokens": 2},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "top_n_tokens": 10, "top_n_tokens_schedule": "cyclic", "min_top_n_tokens": 2}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 5
+    for res in results:
+        assert res is not None
+
+def test_continuous_batching_mirostat(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "mirostat_mode": 1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "mirostat_mode": 1, "mirostat_tau_schedule": "linear", "min_mirostat_tau": 0.5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "mirostat_mode": 1, "mirostat_tau_schedule": "cosine", "min_mirostat_tau": 0.5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "mirostat_mode": 1, "mirostat_tau_schedule": "exponential", "min_mirostat_tau": 0.5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "mirostat_mode": 1, "mirostat_tau_schedule": "cyclic", "min_mirostat_tau": 0.5}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 5
+    for res in results:
+        assert res is not None
+
 def test_continuous_batching_tfs(mocker):
     model = get_mock_model(mocker)
 

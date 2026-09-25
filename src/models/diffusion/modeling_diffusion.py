@@ -2342,6 +2342,21 @@ class MDLMRequest:
     top_a: float = 0.0
     top_a_schedule: str = "constant"
     min_top_a: float = 0.0
+    epsilon_cutoff: float = 0.0
+    epsilon_cutoff_schedule: str = "constant"
+    min_epsilon_cutoff: float = 0.0
+    eta_cutoff: float = 0.0
+    eta_cutoff_schedule: str = "constant"
+    min_eta_cutoff: float = 0.0
+    top_n_tokens: int = 0
+    top_n_tokens_schedule: str = "constant"
+    min_top_n_tokens: int = 0
+    mirostat_mode: int = 0
+    mirostat_tau: float = 5.0
+    mirostat_tau_schedule: str = "constant"
+    min_mirostat_tau: float = 0.0
+    mirostat_eta: float = 0.1
+    mirostat_mu: Optional[float] = None
 
     def __eq__(self, other):
         if not isinstance(other, MDLMRequest):
@@ -2616,6 +2631,94 @@ class MDLMContinuousBatchingManager:
                 indices_to_remove = probs < limit
                 req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
 
+            current_epsilon = req.epsilon_cutoff
+            if req.epsilon_cutoff > 0.0:
+                if req.epsilon_cutoff_schedule == "linear":
+                    current_epsilon = req.epsilon_cutoff * (1.0 - step_ratio)
+                elif req.epsilon_cutoff_schedule == "cosine":
+                    current_epsilon = req.epsilon_cutoff * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.epsilon_cutoff_schedule == "exponential":
+                    current_epsilon = req.epsilon_cutoff * math.exp(-3.0 * step_ratio)
+                elif req.epsilon_cutoff_schedule == "cyclic":
+                    current_epsilon = req.epsilon_cutoff * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_epsilon = max(current_epsilon, req.min_epsilon_cutoff)
+
+            if current_epsilon > 0.0:
+                probs = F.softmax(req_logits, dim=-1)
+                indices_to_remove = probs < current_epsilon
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_eta = req.eta_cutoff
+            if req.eta_cutoff > 0.0:
+                if req.eta_cutoff_schedule == "linear":
+                    current_eta = req.eta_cutoff * (1.0 - step_ratio)
+                elif req.eta_cutoff_schedule == "cosine":
+                    current_eta = req.eta_cutoff * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.eta_cutoff_schedule == "exponential":
+                    current_eta = req.eta_cutoff * math.exp(-3.0 * step_ratio)
+                elif req.eta_cutoff_schedule == "cyclic":
+                    current_eta = req.eta_cutoff * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_eta = max(current_eta, req.min_eta_cutoff)
+
+            if current_eta > 0.0:
+                probs = F.softmax(req_logits, dim=-1)
+                entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                eta_tensor = torch.tensor(current_eta, device=req_logits.device, dtype=req_logits.dtype)
+                threshold = torch.minimum(
+                    eta_tensor,
+                    torch.sqrt(eta_tensor) * torch.exp(-entropy)
+                )
+                indices_to_remove = probs < threshold
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_top_n_tokens = req.top_n_tokens
+            if req.top_n_tokens > 0:
+                if req.top_n_tokens_schedule == "linear":
+                    current_top_n_tokens = int(req.top_n_tokens * (1.0 - step_ratio))
+                elif req.top_n_tokens_schedule == "cosine":
+                    current_top_n_tokens = int(req.top_n_tokens * 0.5 * (1.0 + math.cos(math.pi * step_ratio)))
+                elif req.top_n_tokens_schedule == "exponential":
+                    current_top_n_tokens = int(req.top_n_tokens * math.exp(-3.0 * step_ratio))
+                elif req.top_n_tokens_schedule == "cyclic":
+                    current_top_n_tokens = int(req.top_n_tokens * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio)))
+                current_top_n_tokens = max(current_top_n_tokens, req.min_top_n_tokens)
+
+            if current_top_n_tokens > 0:
+                top_n_vals, _ = torch.topk(req_logits, min(current_top_n_tokens, req_logits.size(-1)))
+                indices_to_remove = req_logits < top_n_vals[..., -1, None]
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_mirostat_tau = req.mirostat_tau
+            current_mirostat_eta = req.mirostat_eta
+
+            if req.mirostat_mode > 0:
+                if req.mirostat_tau_schedule == "linear":
+                    current_mirostat_tau = req.mirostat_tau * (1.0 - step_ratio)
+                elif req.mirostat_tau_schedule == "cosine":
+                    current_mirostat_tau = req.mirostat_tau * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.mirostat_tau_schedule == "exponential":
+                    current_mirostat_tau = req.mirostat_tau * math.exp(-3.0 * step_ratio)
+                elif req.mirostat_tau_schedule == "cyclic":
+                    current_mirostat_tau = req.mirostat_tau * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_mirostat_tau = max(current_mirostat_tau, req.min_mirostat_tau)
+
+                if req.mirostat_mu is None:
+                    req.mirostat_mu = current_mirostat_tau * 2.0
+
+            original_req_logits_for_mirostat = None
+            if req.mirostat_mode == 1:
+                original_req_logits_for_mirostat = req_logits.clone()
+                probs = F.softmax(req_logits, dim=-1)
+                surprise = -torch.log2(probs + 1e-10)
+                indices_to_remove = surprise > req.mirostat_mu
+
+                all_masked = indices_to_remove.all(dim=-1, keepdim=True)
+                if all_masked.any():
+                    min_surprise_indices = surprise.argmin(dim=-1, keepdim=True)
+                    indices_to_remove = indices_to_remove.scatter(-1, min_surprise_indices, False)
+
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
             if req.temperature > 0:
                 req_logits = req_logits / req.temperature
                 probs = F.softmax(req_logits, dim=-1)
@@ -2653,6 +2756,13 @@ class MDLMContinuousBatchingManager:
                 _, select_index = torch.topk(confidence[0], k=M)
                 req.x[0, select_index] = x0[0, select_index].to(req.x.dtype)
                 req.mask_index[0, select_index] = False
+
+            if req.mirostat_mode == 1 and original_req_logits_for_mirostat is not None:
+                probs_for_mu = F.softmax(original_req_logits_for_mirostat, dim=-1)
+                p_x0 = torch.gather(probs_for_mu, -1, x0.unsqueeze(-1)).squeeze(-1)
+                surprise_x0 = -torch.log2(p_x0 + 1e-10)
+                mean_surprise = surprise_x0.mean().item()
+                req.mirostat_mu = req.mirostat_mu - current_mirostat_eta * (mean_surprise - current_mirostat_tau)
 
             req.current_step += 1
 
