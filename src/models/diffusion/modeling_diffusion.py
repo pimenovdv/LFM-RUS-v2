@@ -2357,6 +2357,22 @@ class MDLMRequest:
     min_mirostat_tau: float = 0.0
     mirostat_eta: float = 0.1
     mirostat_mu: Optional[float] = None
+    xtc_threshold: float = 0.0
+    xtc_threshold_schedule: str = "constant"
+    min_xtc_threshold: float = 0.0
+    xtc_probability: float = 0.0
+    xtc_probability_schedule: str = "constant"
+    min_xtc_probability: float = 0.0
+    cutoff_min_percent: float = 0.0
+    cutoff_min_percent_schedule: str = "constant"
+    min_cutoff_min_percent: float = 0.0
+    dry_multiplier: float = 0.0
+    dry_multiplier_schedule: str = "constant"
+    min_dry_multiplier: float = 0.0
+    dry_base: float = 1.75
+    dry_allowed_length: int = 2
+    dry_sequence_breakers: Optional[List[int]] = None
+    original_prompt_len: int = 0
 
     def __eq__(self, other):
         if not isinstance(other, MDLMRequest):
@@ -2376,6 +2392,7 @@ class MDLMContinuousBatchingManager:
         self.completed_requests: List[MDLMRequest] = []
 
     def add_request(self, input_ids: torch.Tensor, max_new_tokens: int, total_steps: int, **kwargs) -> str:
+        kwargs["original_prompt_len"] = input_ids.shape[-1]
         req = MDLMRequest(input_ids=input_ids, max_new_tokens=max_new_tokens, total_steps=total_steps, **kwargs)
         self.pending_requests.append(req)
         return req.request_id
@@ -2529,6 +2546,104 @@ class MDLMContinuousBatchingManager:
                 sorted_indices_to_remove[..., 0] = 0
                 indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
                 req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+
+            current_dry_multiplier = req.dry_multiplier
+            if req.dry_multiplier > 0.0:
+                if req.dry_multiplier_schedule == "linear":
+                    current_dry_multiplier = req.dry_multiplier * (1.0 - step_ratio)
+                elif req.dry_multiplier_schedule == "cosine":
+                    current_dry_multiplier = req.dry_multiplier * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.dry_multiplier_schedule == "exponential":
+                    current_dry_multiplier = req.dry_multiplier * math.exp(-3.0 * step_ratio)
+                elif req.dry_multiplier_schedule == "cyclic":
+                    current_dry_multiplier = req.dry_multiplier * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_dry_multiplier = max(current_dry_multiplier, req.min_dry_multiplier)
+
+            if current_dry_multiplier > 0.0:
+                seq = req.x[0]  # continuous batching is 1 sequence per req
+                seq_len = seq.shape[0]
+                # For continuous batching, req.x can be fully masked or partially.
+                # DRY applies to tokens matched in the past context. We just iterate over all unmasked tokens.
+                # Actually, in continuous batching, the logits are generated for all tokens simultaneously (shape: 1 x seq_len x vocab).
+                # We need to apply DRY for every position where mask_index is True.
+                for pos in range(req.original_prompt_len, seq_len):
+                    if not req.mask_index[0, pos]:
+                        continue # only apply DRY to currently masked tokens (the ones we are predicting)
+
+                    if pos < req.dry_allowed_length:
+                        continue
+
+                    match_len = req.dry_allowed_length
+                    target_suffix = seq[pos - match_len : pos]
+
+                    if (target_suffix == mask_id).any():
+                        continue
+
+                    if req.dry_sequence_breakers is not None:
+                        break_found = False
+                        for br in req.dry_sequence_breakers:
+                            if (target_suffix == br).any():
+                                break_found = True
+                                break
+                        if break_found:
+                            continue
+
+                    token_max_match: dict[int, int] = {}
+
+                    for start_idx in range(pos - match_len):
+                        window = seq[start_idx : start_idx + match_len]
+
+                        if not torch.equal(window, target_suffix):
+                            continue
+
+                        next_token = seq[start_idx + match_len].item()
+                        if next_token == mask_id:
+                            continue
+
+                        curr_match_len = match_len
+                        while start_idx - (curr_match_len - match_len) > 0 and pos - curr_match_len > 0:
+                            prev_pos = pos - curr_match_len - 1
+                            prev_start = start_idx - (curr_match_len - match_len) - 1
+
+                            tok_prev_start = seq[prev_start].item()
+                            tok_prev_pos = seq[prev_pos].item()
+
+                            if tok_prev_start != tok_prev_pos or tok_prev_start == mask_id:
+                                break
+
+                            if req.dry_sequence_breakers is not None and tok_prev_start in req.dry_sequence_breakers:
+                                break
+
+                            curr_match_len += 1
+
+                        if next_token not in token_max_match or curr_match_len > token_max_match[next_token]:
+                            token_max_match[next_token] = curr_match_len
+
+                    for token, max_match in token_max_match.items():
+                        penalty = current_dry_multiplier * (req.dry_base ** (max_match - req.dry_allowed_length))
+                        # Only apply penalty to this specific position's logits
+                        req_logits[0, pos, token] -= penalty
+
+
+            current_cutoff_min_percent = req.cutoff_min_percent
+            if req.cutoff_min_percent > 0.0:
+                if req.cutoff_min_percent_schedule == "linear":
+                    current_cutoff_min_percent = req.cutoff_min_percent * (1.0 - step_ratio)
+                elif req.cutoff_min_percent_schedule == "cosine":
+                    current_cutoff_min_percent = req.cutoff_min_percent * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.cutoff_min_percent_schedule == "exponential":
+                    current_cutoff_min_percent = req.cutoff_min_percent * math.exp(-3.0 * step_ratio)
+                elif req.cutoff_min_percent_schedule == "cyclic":
+                    current_cutoff_min_percent = req.cutoff_min_percent * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_cutoff_min_percent = max(current_cutoff_min_percent, req.min_cutoff_min_percent)
+
+            if current_cutoff_min_percent > 0.0:
+                k_to_remove = int(req_logits.size(-1) * current_cutoff_min_percent)
+                if k_to_remove > 0:
+                    threshold = torch.kthvalue(req_logits, k_to_remove, dim=-1, keepdim=True)[0]
+                    indices_to_remove = req_logits <= threshold
+                    req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
 
             current_min_p = req.min_p
             if req.min_p > 0.0:
@@ -2687,6 +2802,55 @@ class MDLMContinuousBatchingManager:
                 top_n_vals, _ = torch.topk(req_logits, min(current_top_n_tokens, req_logits.size(-1)))
                 indices_to_remove = req_logits < top_n_vals[..., -1, None]
                 req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_xtc_threshold = req.xtc_threshold
+            if req.xtc_threshold > 0.0:
+                if req.xtc_threshold_schedule == "linear":
+                    current_xtc_threshold = req.xtc_threshold * (1.0 - step_ratio)
+                elif req.xtc_threshold_schedule == "cosine":
+                    current_xtc_threshold = req.xtc_threshold * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.xtc_threshold_schedule == "exponential":
+                    current_xtc_threshold = req.xtc_threshold * math.exp(-3.0 * step_ratio)
+                elif req.xtc_threshold_schedule == "cyclic":
+                    current_xtc_threshold = req.xtc_threshold * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_xtc_threshold = max(current_xtc_threshold, req.min_xtc_threshold)
+
+            current_xtc_probability = req.xtc_probability
+            if req.xtc_probability > 0.0:
+                if req.xtc_probability_schedule == "linear":
+                    current_xtc_probability = req.xtc_probability * (1.0 - step_ratio)
+                elif req.xtc_probability_schedule == "cosine":
+                    current_xtc_probability = req.xtc_probability * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.xtc_probability_schedule == "exponential":
+                    current_xtc_probability = req.xtc_probability * math.exp(-3.0 * step_ratio)
+                elif req.xtc_probability_schedule == "cyclic":
+                    current_xtc_probability = req.xtc_probability * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_xtc_probability = max(current_xtc_probability, req.min_xtc_probability)
+
+            if current_xtc_probability > 0.0 and current_xtc_threshold > 0.0:
+                probs = F.softmax(req_logits, dim=-1)
+                max_probs, max_indices = probs.max(dim=-1, keepdim=True)
+
+                # Create a mask for tokens exceeding the threshold
+                exceeds_threshold = max_probs > current_xtc_threshold
+
+                # Generate random numbers for each token position
+                random_probs = torch.rand_like(max_probs)
+
+                # Mask for applying XTC
+                apply_xtc = exceeds_threshold & (random_probs < current_xtc_probability)
+
+                # Expand apply_xtc to match logits shape for scatter
+                apply_xtc_expanded = apply_xtc.expand(-1, -1, req_logits.size(-1))
+
+                # Create a mask that is True only at the max_indices
+                top_token_mask = torch.zeros_like(req_logits, dtype=torch.bool).scatter_(-1, max_indices, True)
+
+                # Combine the masks
+                xtc_mask = top_token_mask & apply_xtc_expanded
+
+                req_logits = req_logits.masked_fill(xtc_mask, -float("Inf"))
+
 
             current_mirostat_tau = req.mirostat_tau
             current_mirostat_eta = req.mirostat_eta
