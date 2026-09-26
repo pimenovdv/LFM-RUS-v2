@@ -210,3 +210,49 @@ def test_continuous_batching_top_a(mocker):
     assert len(results) == 5
     for res in results:
         assert res is not None
+
+def test_continuous_batching_xtc(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "xtc_threshold": 0.1, "xtc_probability": 0.5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "xtc_threshold": 0.1, "xtc_probability": 0.5, "xtc_threshold_schedule": "linear", "min_xtc_threshold": 0.05, "xtc_probability_schedule": "cosine", "min_xtc_probability": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "xtc_threshold": 0.1, "xtc_probability": 0.5, "xtc_threshold_schedule": "exponential", "xtc_probability_schedule": "cyclic"}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 3
+    for res in results:
+        assert res is not None
+
+def test_continuous_batching_cutoff_min_percent(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "cutoff_min_percent": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "cutoff_min_percent": 0.1, "cutoff_min_percent_schedule": "linear", "min_cutoff_min_percent": 0.05},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "cutoff_min_percent": 0.1, "cutoff_min_percent_schedule": "cosine", "min_cutoff_min_percent": 0.05},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "cutoff_min_percent": 0.1, "cutoff_min_percent_schedule": "exponential", "min_cutoff_min_percent": 0.05},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "cutoff_min_percent": 0.1, "cutoff_min_percent_schedule": "cyclic", "min_cutoff_min_percent": 0.05}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 5
+    for res in results:
+        assert res is not None
+
+def test_continuous_batching_dry(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2, 3, 1, 2]]), "max_new_tokens": 2, "total_steps": 2, "dry_multiplier": 0.8},
+        {"input_ids": torch.tensor([[1, 2, 3, 1, 2]]), "max_new_tokens": 2, "total_steps": 2, "dry_multiplier": 0.8, "dry_multiplier_schedule": "linear", "min_dry_multiplier": 0.1},
+        {"input_ids": torch.tensor([[1, 2, 3, 1, 2]]), "max_new_tokens": 2, "total_steps": 2, "dry_multiplier": 0.8, "dry_multiplier_schedule": "cosine", "min_dry_multiplier": 0.1},
+        {"input_ids": torch.tensor([[1, 2, 3, 1, 2]]), "max_new_tokens": 2, "total_steps": 2, "dry_multiplier": 0.8, "dry_multiplier_schedule": "exponential", "min_dry_multiplier": 0.1},
+        {"input_ids": torch.tensor([[1, 2, 3, 1, 2]]), "max_new_tokens": 2, "total_steps": 2, "dry_multiplier": 0.8, "dry_multiplier_schedule": "cyclic", "min_dry_multiplier": 0.1, "dry_sequence_breakers": [3]}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 5
+    for res in results:
+        assert res is not None
