@@ -256,3 +256,19 @@ def test_continuous_batching_dry(mocker):
     assert len(results) == 5
     for res in results:
         assert res is not None
+
+def test_continuous_batching_gumbel_temperature(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "gumbel_temperature": 1.5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "gumbel_temperature": 1.5, "gumbel_temperature_schedule": "linear", "min_gumbel_temperature": 0.5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "gumbel_temperature": 1.5, "gumbel_temperature_schedule": "exponential"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "gumbel_temperature": 1.5, "gumbel_temperature_schedule": "cosine"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "gumbel_temperature": 1.5, "gumbel_temperature_schedule": "cyclic"}
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 5
+    for res in results:
+        assert isinstance(res, torch.Tensor)

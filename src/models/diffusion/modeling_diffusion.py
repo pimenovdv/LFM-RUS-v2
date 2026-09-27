@@ -2307,6 +2307,9 @@ class MDLMRequest:
     total_steps: int
     unmasking_schedule: str = "linear"
     temperature: float = 0.0
+    gumbel_temperature: Optional[float] = None
+    gumbel_temperature_schedule: str = "constant"
+    min_gumbel_temperature: float = 0.0
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     current_step: int = 0
     x: Optional[torch.Tensor] = None
@@ -2883,13 +2886,31 @@ class MDLMContinuousBatchingManager:
 
                 req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
 
-            if req.temperature > 0:
+            gumbel_t = req.gumbel_temperature if req.gumbel_temperature is not None else req.temperature
+            current_gumbel_temperature = gumbel_t
+            if gumbel_t > 0.0 and req.gumbel_temperature_schedule != "constant":
+                if req.gumbel_temperature_schedule == "linear":
+                    current_gumbel_temperature = gumbel_t * (1.0 - step_ratio)
+                elif req.gumbel_temperature_schedule == "cosine":
+                    current_gumbel_temperature = gumbel_t * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.gumbel_temperature_schedule == "exponential":
+                    current_gumbel_temperature = gumbel_t * math.exp(-3.0 * step_ratio)
+                elif req.gumbel_temperature_schedule == "cyclic":
+                    current_gumbel_temperature = gumbel_t * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+            current_gumbel_temperature = max(current_gumbel_temperature, req.min_gumbel_temperature)
+
+            if req.temperature > 0 and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
+                # Standard multinomial sampling if gumbel is explicitly disabled or we use fallback standard temp logic
                 req_logits = req_logits / req.temperature
                 probs = F.softmax(req_logits, dim=-1)
                 # Reshape for multinomial: (batch * seq_len, vocab_size)
                 reshaped_probs = probs.view(-1, probs.size(-1))
                 x0 = torch.multinomial(reshaped_probs, num_samples=1).view(probs.size(0), probs.size(1))
             else:
+                if current_gumbel_temperature > 0.0:
+                    noise = torch.rand_like(req_logits)
+                    gumbel_noise_log = current_gumbel_temperature * torch.log(-torch.log(noise.clamp(min=1e-9)))
+                    req_logits = req_logits - gumbel_noise_log
                 x0 = torch.argmax(req_logits, dim=-1)
 
             p = F.softmax(req_logits.to(torch.float64), dim=-1)
