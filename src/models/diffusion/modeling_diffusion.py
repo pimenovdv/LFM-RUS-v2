@@ -2307,6 +2307,9 @@ class MDLMRequest:
     total_steps: int
     unmasking_schedule: str = "linear"
     temperature: float = 0.0
+    dynamic_temperature_entropy: float = 0.0
+    dynamic_temperature_entropy_schedule: str = "constant"
+    min_dynamic_temperature_entropy: float = 0.0
     gumbel_temperature: Optional[float] = None
     gumbel_temperature_schedule: str = "constant"
     min_gumbel_temperature: float = 0.0
@@ -2899,9 +2902,33 @@ class MDLMContinuousBatchingManager:
                     current_gumbel_temperature = gumbel_t * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
             current_gumbel_temperature = max(current_gumbel_temperature, req.min_gumbel_temperature)
 
-            if req.temperature > 0 and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
+            current_temperature = req.temperature
+            if req.temperature > 0 or req.dynamic_temperature_entropy > 0:
+                if req.dynamic_temperature_entropy > 0.0:
+                    current_dynamic_temperature_entropy = req.dynamic_temperature_entropy
+                    if req.dynamic_temperature_entropy_schedule == "linear":
+                        current_dynamic_temperature_entropy = req.dynamic_temperature_entropy * (1.0 - step_ratio)
+                    elif req.dynamic_temperature_entropy_schedule == "cosine":
+                        current_dynamic_temperature_entropy = req.dynamic_temperature_entropy * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif req.dynamic_temperature_entropy_schedule == "exponential":
+                        current_dynamic_temperature_entropy = req.dynamic_temperature_entropy * math.exp(-3.0 * step_ratio)
+                    elif req.dynamic_temperature_entropy_schedule == "cyclic":
+                        current_dynamic_temperature_entropy = req.dynamic_temperature_entropy * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    current_dynamic_temperature_entropy = max(current_dynamic_temperature_entropy, req.min_dynamic_temperature_entropy)
+
+                    probs = F.softmax(req_logits, dim=-1)
+                    entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                    current_temperature = current_temperature + current_dynamic_temperature_entropy * entropy
+
+                    if isinstance(current_temperature, torch.Tensor):
+                        current_temperature = torch.clamp(current_temperature, min=1e-5)
+                    else:
+                        current_temperature = max(current_temperature, 1e-5)
+
+            if (req.temperature > 0 or req.dynamic_temperature_entropy > 0) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
                 # Standard multinomial sampling if gumbel is explicitly disabled or we use fallback standard temp logic
-                req_logits = req_logits / req.temperature
+                req_logits = req_logits / current_temperature
                 probs = F.softmax(req_logits, dim=-1)
                 # Reshape for multinomial: (batch * seq_len, vocab_size)
                 reshaped_probs = probs.view(-1, probs.size(-1))
