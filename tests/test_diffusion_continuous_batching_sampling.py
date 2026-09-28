@@ -272,3 +272,20 @@ def test_continuous_batching_gumbel_temperature(mocker):
     assert len(results) == 5
     for res in results:
         assert isinstance(res, torch.Tensor)
+
+def test_continuous_batching_dynamic_temperature_entropy(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "dynamic_temperature_entropy": 0.5},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "dynamic_temperature_entropy": 0.5, "dynamic_temperature_entropy_schedule": "linear", "min_dynamic_temperature_entropy": 0.1},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "dynamic_temperature_entropy": 0.5, "dynamic_temperature_entropy_schedule": "cosine"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "dynamic_temperature_entropy": 0.5, "dynamic_temperature_entropy_schedule": "exponential"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "dynamic_temperature_entropy": 0.5, "dynamic_temperature_entropy_schedule": "cyclic"},
+        {"input_ids": torch.tensor([[1, 2]]), "max_new_tokens": 1, "total_steps": 2, "dynamic_temperature_entropy": 0.5, "temperature": 0.8}, # Combined with base temp
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == 6
+    for res in results:
+        assert isinstance(res, torch.Tensor)
