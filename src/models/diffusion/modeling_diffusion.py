@@ -583,6 +583,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         logits = self.lm_head(outputs.last_hidden_state)
 
+        if getattr(self.config, "logit_softcapping", 0.0) > 0.0:
+            logits = (logits / self.config.logit_softcapping).tanh() * self.config.logit_softcapping
+
         loss = None
         if labels is not None:
             if getattr(self.config, "use_flow_matching", False) and timesteps is not None:
