@@ -28,9 +28,11 @@ class DiffusionConfig(PretrainedConfig):
         vq_embedding_dim=64,
         use_flow_matching=False,
         use_self_conditioning=False,
+        logit_softcapping=0.0,
         **kwargs
     ):
         super().__init__(**kwargs)
+        self.logit_softcapping = logit_softcapping
         self.use_flow_matching = use_flow_matching
         self.use_self_conditioning = use_self_conditioning
         self.use_latent_diffusion = use_latent_diffusion

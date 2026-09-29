@@ -2390,3 +2390,50 @@ def test_consistency_sampling(mocker):
         )
 
         assert outputs.shape == (1, 4)
+
+def test_logit_softcapping(mocker):
+    from src.models.diffusion.configuration_diffusion import DiffusionConfig
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+    import torch
+
+    config = DiffusionConfig(
+        base_config_dict={"vocab_size": 100, "hidden_size": 32, "model_type": "gpt2"},
+        logit_softcapping=30.0
+    )
+
+    # Mock AutoModel to return a dummy hidden state
+    mock_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
+    mock_inner = mocker.MagicMock()
+    mock_inner.config.model_type = "gpt2"
+
+    # We need a proper nn.Embedding or nn.Parameter for get_input_embeddings
+    embed_mock = torch.nn.Embedding(100, 32)
+    mock_inner.get_input_embeddings.return_value = embed_mock
+
+    class DummyOutputs:
+        def __init__(self):
+            self.last_hidden_state = torch.randn(2, 5, 32)
+            self.hidden_states = [torch.randn(2, 5, 32), torch.randn(2, 5, 32)]
+
+    mock_inner.return_value = DummyOutputs()
+    mock_model.from_config.return_value = mock_inner
+
+    model = DiffusionModelForConditionalGeneration(config)
+
+    # We want the un-capped logits to be outside the range [-30, 30] to verify capping works
+    # We can mock the forward pass of lm_head to return specific large values
+    uncapped_logits = torch.tensor([[[-100.0, 0.0, 50.0, 100.0]]])
+    model.lm_head.forward = mocker.MagicMock(return_value=uncapped_logits)
+
+    input_ids = torch.tensor([[1, 2, 3, 4, 5]])
+    timesteps = torch.tensor([10])
+
+    outputs = model(input_ids=input_ids, timesteps=timesteps)
+    logits = outputs.logits if hasattr(outputs, "logits") else outputs[0]
+
+    # Expected logits calculation: (logits / 30.0).tanh() * 30.0
+    expected_logits = (uncapped_logits / 30.0).tanh() * 30.0
+
+    assert torch.allclose(logits, expected_logits)
+    assert torch.max(logits) <= 30.0
+    assert torch.min(logits) >= -30.0
