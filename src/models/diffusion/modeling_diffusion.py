@@ -851,6 +851,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         forced_eos_token_id: Optional[Union[int, list[int]]] = None,
         renormalize_logits: bool = False,
         use_kv_cache: bool = False,
+        stochastic_unmasking: bool = False,
 
         unmasking_schedule: str = "linear",
         num_beams: int = 1,
@@ -1093,6 +1094,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         draft_x0 = filter_special_tokens(draft_x0, self.tokenizer, mask_id)
 
                     draft_confidence = torch.where(mask_index, draft_confidence, -torch.tensor(float('inf'), device=device, dtype=torch.float64))
+                    if stochastic_unmasking:
+                        draft_confidence = torch.where(draft_confidence == -float('inf'), draft_confidence, draft_confidence + torch.rand_like(draft_confidence))
 
                     draft_mask_index = mask_index.clone()
                     spec_tokens = torch.zeros_like(x, dtype=torch.bool, device=device)
@@ -2135,7 +2138,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                     x0_p[:, block_end:] = -np.inf
                     x0 = torch.where(mask_index, x0, x)
-                    confidence = torch.where(mask_index, x0_p, -torch.tensor(np.inf, device=device))
+                    confidence = torch.where(mask_index, x0_p, -torch.tensor(float('inf'), device=device))
 
                     if unmasking_schedule == "entropy":
                         p_ent = F.softmax(logits.to(torch.float64), dim=-1)
@@ -2155,6 +2158,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                 target_tokens = max(1, int(curr_masks * confidence_score))
                                 linear_tokens = max(1, curr_masks // remaining_steps)
                                 num_transfer_tokens[b_idx, i] = int((target_tokens + linear_tokens) / 2)
+
+                    if stochastic_unmasking:
+                        confidence = torch.where(confidence == -float('inf'), confidence, confidence + torch.rand_like(confidence))
 
                     if num_beams > 1:
                         next_beam_scores = torch.full((original_batch_size, num_beams * num_beams), -1e9, device=device)
@@ -2316,6 +2322,7 @@ class MDLMRequest:
     gumbel_temperature: Optional[float] = None
     gumbel_temperature_schedule: str = "constant"
     min_gumbel_temperature: float = 0.0
+    stochastic_unmasking: bool = False
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     current_step: int = 0
     x: Optional[torch.Tensor] = None
@@ -2966,6 +2973,9 @@ class MDLMContinuousBatchingManager:
                     linear_tokens = max(1, curr_masks // remaining_steps)
                     req.transfer_tokens[0, req.current_step] = int((target_tokens + linear_tokens) / 2)
                 M = req.transfer_tokens[0, req.current_step].item()
+
+            if req.stochastic_unmasking:
+                confidence = torch.where(confidence == -float('inf'), confidence, confidence + torch.rand_like(confidence))
 
             if M > 0:
                 _, select_index = torch.topk(confidence[0], k=M)
