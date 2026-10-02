@@ -782,6 +782,12 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         tfs_z: float = 1.0,
         tfs_z_schedule: str = "constant",
         min_tfs_z: float = 1.0,
+        quantile_low: float = 0.0,
+        quantile_low_schedule: str = "constant",
+        min_quantile_low: float = 0.0,
+        quantile_high: float = 1.0,
+        quantile_high_schedule: str = "constant",
+        min_quantile_high: float = 1.0,
         top_n_tokens: int = 0,
         top_n_tokens_schedule: str = "constant",
         min_top_n_tokens: int = 0,
@@ -1807,6 +1813,43 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
                     sorted_indices_to_remove[..., 0] = 0
 
+                    indices_to_remove = sorted_indices_to_remove.scatter(dim=-1, index=sorted_indices, src=sorted_indices_to_remove)
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                current_quantile_low = quantile_low
+                current_quantile_high = quantile_high
+                if quantile_low > 0.0 or quantile_high < 1.0:
+                    if quantile_low_schedule == "linear":
+                        current_quantile_low = quantile_low + (min_quantile_low - quantile_low) * step_ratio
+                    elif quantile_low_schedule == "cosine":
+                        current_quantile_low = min_quantile_low + (quantile_low - min_quantile_low) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif quantile_low_schedule == "exponential":
+                        current_quantile_low = min_quantile_low + (quantile_low - min_quantile_low) * math.exp(-3.0 * step_ratio)
+                    elif quantile_low_schedule == "cyclic":
+                        current_quantile_low = min_quantile_low + (quantile_low - min_quantile_low) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    if quantile_high_schedule == "linear":
+                        current_quantile_high = quantile_high + (min_quantile_high - quantile_high) * step_ratio
+                    elif quantile_high_schedule == "cosine":
+                        current_quantile_high = min_quantile_high + (quantile_high - min_quantile_high) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif quantile_high_schedule == "exponential":
+                        current_quantile_high = min_quantile_high + (quantile_high - min_quantile_high) * math.exp(-3.0 * step_ratio)
+                    elif quantile_high_schedule == "cyclic":
+                        current_quantile_high = min_quantile_high + (quantile_high - min_quantile_high) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    probs = F.softmax(logits, dim=-1)
+                    sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+                    cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+                    # Create a mask for values outside the quantile range [low, high]
+                    # We subtract sorted_probs from cumulative_probs to get the exclusive prefix sum
+                    exclusive_cumulative_probs = cumulative_probs - sorted_probs
+                    sorted_indices_to_remove = (exclusive_cumulative_probs >= current_quantile_high) | (cumulative_probs <= current_quantile_low)
+
+                    # Ensure we don't mask everything by keeping at least the most probable token if everything is masked
+                    all_masked = sorted_indices_to_remove.all(dim=-1, keepdim=True)
+                    sorted_indices_to_remove = sorted_indices_to_remove & (~all_masked | (torch.arange(sorted_indices_to_remove.size(-1), device=logits.device) != 0))
+
                     indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
@@ -2355,6 +2398,12 @@ class MDLMRequest:
     tfs: float = 1.0
     tfs_schedule: str = "constant"
     min_tfs: float = 0.0
+    quantile_low: float = 0.0
+    quantile_low_schedule: str = "constant"
+    min_quantile_low: float = 0.0
+    quantile_high: float = 1.0
+    quantile_high_schedule: str = "constant"
+    min_quantile_high: float = 1.0
     top_a: float = 0.0
     top_a_schedule: str = "constant"
     min_top_a: float = 0.0
@@ -2703,6 +2752,40 @@ class MDLMContinuousBatchingManager:
                 sorted_indices_to_remove = cumulative_probs > current_typical_p
                 sorted_indices_to_remove[..., 1:] = sorted_indices_to_remove[..., :-1].clone()
                 sorted_indices_to_remove[..., 0] = 0
+
+                indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_quantile_low = req.quantile_low
+            current_quantile_high = req.quantile_high
+            if req.quantile_low > 0.0 or req.quantile_high < 1.0:
+                if req.quantile_low_schedule == "linear":
+                    current_quantile_low = req.quantile_low + (req.min_quantile_low - req.quantile_low) * step_ratio
+                elif req.quantile_low_schedule == "cosine":
+                    current_quantile_low = req.min_quantile_low + (req.quantile_low - req.min_quantile_low) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.quantile_low_schedule == "exponential":
+                    current_quantile_low = req.min_quantile_low + (req.quantile_low - req.min_quantile_low) * math.exp(-3.0 * step_ratio)
+                elif req.quantile_low_schedule == "cyclic":
+                    current_quantile_low = req.min_quantile_low + (req.quantile_low - req.min_quantile_low) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                if req.quantile_high_schedule == "linear":
+                    current_quantile_high = req.quantile_high + (req.min_quantile_high - req.quantile_high) * step_ratio
+                elif req.quantile_high_schedule == "cosine":
+                    current_quantile_high = req.min_quantile_high + (req.quantile_high - req.min_quantile_high) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.quantile_high_schedule == "exponential":
+                    current_quantile_high = req.min_quantile_high + (req.quantile_high - req.min_quantile_high) * math.exp(-3.0 * step_ratio)
+                elif req.quantile_high_schedule == "cyclic":
+                    current_quantile_high = req.min_quantile_high + (req.quantile_high - req.min_quantile_high) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                probs = F.softmax(req_logits, dim=-1)
+                sorted_probs, sorted_indices = torch.sort(probs, descending=True, dim=-1)
+                cumulative_probs = torch.cumsum(sorted_probs, dim=-1)
+
+                exclusive_cumulative_probs = cumulative_probs - sorted_probs
+                sorted_indices_to_remove = (exclusive_cumulative_probs >= current_quantile_high) | (cumulative_probs <= current_quantile_low)
+
+                all_masked = sorted_indices_to_remove.all(dim=-1, keepdim=True)
+                sorted_indices_to_remove = sorted_indices_to_remove & (~all_masked | (torch.arange(sorted_indices_to_remove.size(-1), device=req_logits.device) != 0))
 
                 indices_to_remove = sorted_indices_to_remove.scatter(-1, sorted_indices, sorted_indices_to_remove)
                 req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
