@@ -788,6 +788,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         quantile_high: float = 1.0,
         quantile_high_schedule: str = "constant",
         min_quantile_high: float = 1.0,
+        rank_penalty: float = 0.0,
+        rank_penalty_schedule: str = "constant",
+        min_rank_penalty: float = 0.0,
         top_n_tokens: int = 0,
         top_n_tokens_schedule: str = "constant",
         min_top_n_tokens: int = 0,
@@ -2404,6 +2407,9 @@ class MDLMRequest:
     quantile_high: float = 1.0
     quantile_high_schedule: str = "constant"
     min_quantile_high: float = 1.0
+    rank_penalty: float = 0.0
+    rank_penalty_schedule: str = "constant"
+    min_rank_penalty: float = 0.0
     top_a: float = 0.0
     top_a_schedule: str = "constant"
     min_top_a: float = 0.0
@@ -2711,6 +2717,24 @@ class MDLMContinuousBatchingManager:
                     req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
 
             current_min_p = req.min_p
+            if req.rank_penalty > 0.0:
+                current_rank_penalty = req.rank_penalty
+                if req.rank_penalty_schedule == "linear":
+                    current_rank_penalty = req.rank_penalty + (req.min_rank_penalty - req.rank_penalty) * step_ratio
+                elif req.rank_penalty_schedule == "cosine":
+                    current_rank_penalty = req.min_rank_penalty + (req.rank_penalty - req.min_rank_penalty) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.rank_penalty_schedule == "exponential":
+                    current_rank_penalty = req.min_rank_penalty + (req.rank_penalty - req.min_rank_penalty) * math.exp(-3.0 * step_ratio)
+                elif req.rank_penalty_schedule == "cyclic":
+                    current_rank_penalty = req.min_rank_penalty + (req.rank_penalty - req.min_rank_penalty) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                # Apply rank penalty
+                sorted_logits, sorted_indices = torch.sort(req_logits, descending=True, dim=-1)
+                ranks = torch.arange(1, sorted_logits.shape[-1] + 1, device=req_logits.device).unsqueeze(0).expand_as(sorted_logits)
+                rank_penalty_tensor = current_rank_penalty * torch.log(ranks.float())
+                sorted_logits = sorted_logits - rank_penalty_tensor
+                req_logits.scatter_(-1, sorted_indices, sorted_logits)
+
             if req.min_p > 0.0:
                 if req.min_p_schedule == "linear":
                     current_min_p = req.min_p * (1.0 - step_ratio)
