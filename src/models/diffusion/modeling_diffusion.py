@@ -791,6 +791,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         rank_penalty: float = 0.0,
         rank_penalty_schedule: str = "constant",
         min_rank_penalty: float = 0.0,
+        prob_threshold_val: float = 0.0,
+        prob_threshold_schedule: str = "constant",
+        min_prob_threshold_val: float = 0.0,
         top_n_tokens: int = 0,
         top_n_tokens_schedule: str = "constant",
         min_top_n_tokens: int = 0,
@@ -1413,6 +1416,43 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         threshold = torch.kthvalue(logits, k_to_remove, dim=-1, keepdim=True)[0]
                         indices_to_remove = logits <= threshold
                         logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                current_prob_threshold_val = prob_threshold_val
+                if prob_threshold_val > 0.0:
+                    if prob_threshold_schedule == "linear":
+                        current_prob_threshold_val = prob_threshold_val * (1.0 - step_ratio)
+                    elif prob_threshold_schedule == "cosine":
+                        current_prob_threshold_val = prob_threshold_val * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif prob_threshold_schedule == "exponential":
+                        current_prob_threshold_val = prob_threshold_val * math.exp(-3.0 * step_ratio)
+                    elif prob_threshold_schedule == "cyclic":
+                        current_prob_threshold_val = prob_threshold_val * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_prob_threshold_val = max(current_prob_threshold_val, min_prob_threshold_val)
+
+                if current_prob_threshold_val > 0.0:
+                    probs = F.softmax(logits, dim=-1)
+                    max_probs, _ = probs.max(dim=-1, keepdim=True)
+                    # Protect max_probs from being removed to avoid NaN
+                    indices_to_remove = (probs < current_prob_threshold_val) & (probs < max_probs)
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                current_rank_penalty = rank_penalty
+                if rank_penalty > 0.0:
+                    if rank_penalty_schedule == "linear":
+                        current_rank_penalty = rank_penalty + (min_rank_penalty - rank_penalty) * step_ratio
+                    elif rank_penalty_schedule == "cosine":
+                        current_rank_penalty = min_rank_penalty + (rank_penalty - min_rank_penalty) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif rank_penalty_schedule == "exponential":
+                        current_rank_penalty = min_rank_penalty + (rank_penalty - min_rank_penalty) * math.exp(-3.0 * step_ratio)
+                    elif rank_penalty_schedule == "cyclic":
+                        current_rank_penalty = min_rank_penalty + (rank_penalty - min_rank_penalty) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    # Apply rank penalty
+                    sorted_logits, sorted_indices = torch.sort(logits, descending=True, dim=-1)
+                    ranks = torch.arange(1, sorted_logits.shape[-1] + 1, device=logits.device).unsqueeze(0).unsqueeze(0).expand_as(sorted_logits)
+                    rank_penalty_tensor = current_rank_penalty * torch.log(ranks.float())
+                    sorted_logits = sorted_logits - rank_penalty_tensor
+                    logits.scatter_(-1, sorted_indices, sorted_logits)
 
                 current_dry_multiplier = dry_multiplier
                 if dry_multiplier > 0.0:
@@ -2410,6 +2450,9 @@ class MDLMRequest:
     rank_penalty: float = 0.0
     rank_penalty_schedule: str = "constant"
     min_rank_penalty: float = 0.0
+    prob_threshold_val: float = 0.0
+    prob_threshold_schedule: str = "constant"
+    min_prob_threshold_val: float = 0.0
     top_a: float = 0.0
     top_a_schedule: str = "constant"
     min_top_a: float = 0.0
@@ -2717,6 +2760,25 @@ class MDLMContinuousBatchingManager:
                     req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
 
             current_min_p = req.min_p
+            if req.prob_threshold_val > 0.0:
+                current_prob_threshold_val = req.prob_threshold_val
+                if req.prob_threshold_schedule == "linear":
+                    current_prob_threshold_val = req.prob_threshold_val * (1.0 - step_ratio)
+                elif req.prob_threshold_schedule == "cosine":
+                    current_prob_threshold_val = req.prob_threshold_val * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.prob_threshold_schedule == "exponential":
+                    current_prob_threshold_val = req.prob_threshold_val * math.exp(-3.0 * step_ratio)
+                elif req.prob_threshold_schedule == "cyclic":
+                    current_prob_threshold_val = req.prob_threshold_val * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_prob_threshold_val = max(current_prob_threshold_val, req.min_prob_threshold_val)
+
+                if current_prob_threshold_val > 0.0:
+                    probs = F.softmax(req_logits, dim=-1)
+                    max_probs, _ = probs.max(dim=-1, keepdim=True)
+                    # Protect max_probs from being removed to avoid NaN
+                    indices_to_remove = (probs < current_prob_threshold_val) & (probs < max_probs)
+                    req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
             if req.rank_penalty > 0.0:
                 current_rank_penalty = req.rank_penalty
                 if req.rank_penalty_schedule == "linear":

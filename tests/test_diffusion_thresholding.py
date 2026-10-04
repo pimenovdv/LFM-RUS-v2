@@ -3,15 +3,19 @@ import torch
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMRequest, MDLMContinuousBatchingManager
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 
-def test_rank_penalty_generate(mocker):
+def test_prob_threshold_generate(mocker):
     config_dict = {"vocab_size": 100, "hidden_size": 32, "mask_token_id": 99, "base_config_dict": {"model_type": "gpt2", "vocab_size": 100}}
     config = DiffusionConfig(**config_dict)
     model = DiffusionModelForConditionalGeneration(config)
 
     def mock_forward(*args, **kwargs):
         class Output:
-            # Predict monotonically decreasing logits so that indices are their ranks
-            logits = torch.linspace(10, 1, steps=100).unsqueeze(0).unsqueeze(0)
+            # Predict some logits
+            logits = torch.randn(1, 4, 100)
+            # Make one logit very high and others low so probabilities are distinct
+            logits[0, 0, 0] = 10.0
+            logits[0, 0, 1] = 5.0
+            logits[0, 0, 2] = -10.0
             last_hidden_state = torch.randn(1, 4, 32)
         return Output()
 
@@ -19,26 +23,26 @@ def test_rank_penalty_generate(mocker):
 
     input_ids = torch.tensor([[1, 2, 3]])
 
-    # Run without rank penalty
+    # Run without threshold
     torch.manual_seed(42)
-    out_no_penalty = model.generate(
+    out_no_threshold = model.generate(
         input_ids,
-        rank_penalty=0.0,
+        prob_threshold_val=0.0,
         max_new_tokens=1,
     )
 
-    # Run with rank penalty
+    # Run with threshold
     torch.manual_seed(42)
-    out_with_penalty = model.generate(
+    out_with_threshold = model.generate(
         input_ids,
-        rank_penalty=2.0,
+        prob_threshold_val=0.9,
         max_new_tokens=1,
     )
 
-    assert out_with_penalty is not None
-    assert out_no_penalty is not None
+    assert out_with_threshold is not None
+    assert out_no_threshold is not None
 
-def test_rank_penalty_schedules(mocker):
+def test_prob_threshold_schedules(mocker):
     config_dict = {"vocab_size": 100, "hidden_size": 32, "mask_token_id": 99, "base_config_dict": {"model_type": "gpt2", "vocab_size": 100}}
     config = DiffusionConfig(**config_dict)
     model = DiffusionModelForConditionalGeneration(config)
@@ -57,22 +61,22 @@ def test_rank_penalty_schedules(mocker):
     for sched in schedules:
         out = model.generate(
             input_ids,
-            rank_penalty=2.0,
-            min_rank_penalty=0.5,
-            rank_penalty_schedule=sched,
+            prob_threshold_val=0.5,
+            min_prob_threshold_val=0.1,
+            prob_threshold_schedule=sched,
             max_new_tokens=1,
         )
         assert out is not None
 
-def test_rank_penalty_continuous_batching(mocker):
+def test_prob_threshold_continuous_batching(mocker):
     config_dict = {"vocab_size": 100, "hidden_size": 32, "mask_token_id": 99, "base_config_dict": {"model_type": "gpt2", "vocab_size": 100}}
     config = DiffusionConfig(**config_dict)
     model = DiffusionModelForConditionalGeneration(config)
 
     manager = MDLMContinuousBatchingManager(model)
 
-    manager.add_request(input_ids=torch.tensor([[1,2,3]]), max_new_tokens=5, total_steps=10, rank_penalty=1.0)
-    manager.add_request(input_ids=torch.tensor([[4,5]]), max_new_tokens=5, total_steps=10, rank_penalty=2.0, min_rank_penalty=0.1, rank_penalty_schedule="linear")
+    manager.add_request(input_ids=torch.tensor([[1,2,3]]), max_new_tokens=5, total_steps=10, prob_threshold_val=0.5)
+    manager.add_request(input_ids=torch.tensor([[4,5]]), max_new_tokens=5, total_steps=10, prob_threshold_val=0.9, min_prob_threshold_val=0.1, prob_threshold_schedule="linear")
 
     def mock_forward(*args, **kwargs):
         input_ids = kwargs.get('input_ids')
