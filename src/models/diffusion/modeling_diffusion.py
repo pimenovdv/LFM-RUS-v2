@@ -794,6 +794,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         prob_threshold_val: float = 0.0,
         prob_threshold_schedule: str = "constant",
         min_prob_threshold_val: float = 0.0,
+        uniform_noise_scale: float = 0.0,
+        uniform_noise_schedule: str = "constant",
+        min_uniform_noise_scale: float = 0.0,
         top_n_tokens: int = 0,
         top_n_tokens_schedule: str = "constant",
         min_top_n_tokens: int = 0,
@@ -1761,6 +1764,22 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                             )
                             logits[:, :, eos_id] = score
 
+                current_uniform_noise_scale = uniform_noise_scale
+                if uniform_noise_scale > 0.0:
+                    if uniform_noise_schedule == "linear":
+                        current_uniform_noise_scale = uniform_noise_scale * (1.0 - step_ratio)
+                    elif uniform_noise_schedule == "cosine":
+                        current_uniform_noise_scale = uniform_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif uniform_noise_schedule == "exponential":
+                        current_uniform_noise_scale = uniform_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif uniform_noise_schedule == "cyclic":
+                        current_uniform_noise_scale = uniform_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_uniform_noise_scale = max(current_uniform_noise_scale, min_uniform_noise_scale)
+
+                if current_uniform_noise_scale > 0.0:
+                    noise = (torch.rand_like(logits) * 2 - 1) * current_uniform_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
                 current_top_n_tokens = top_n_tokens
                 if top_n_tokens > 0:
                     if top_n_tokens_schedule == "linear":
@@ -2453,6 +2472,9 @@ class MDLMRequest:
     prob_threshold_val: float = 0.0
     prob_threshold_schedule: str = "constant"
     min_prob_threshold_val: float = 0.0
+    uniform_noise_scale: float = 0.0
+    uniform_noise_schedule: str = "constant"
+    min_uniform_noise_scale: float = 0.0
     top_a: float = 0.0
     top_a_schedule: str = "constant"
     min_top_a: float = 0.0
@@ -2760,6 +2782,22 @@ class MDLMContinuousBatchingManager:
                     req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
 
             current_min_p = req.min_p
+            if req.uniform_noise_scale > 0.0:
+                current_uniform_noise_scale = req.uniform_noise_scale
+                if req.uniform_noise_schedule == "linear":
+                    current_uniform_noise_scale = req.uniform_noise_scale * (1.0 - step_ratio)
+                elif req.uniform_noise_schedule == "cosine":
+                    current_uniform_noise_scale = req.uniform_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.uniform_noise_schedule == "exponential":
+                    current_uniform_noise_scale = req.uniform_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.uniform_noise_schedule == "cyclic":
+                    current_uniform_noise_scale = req.uniform_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_uniform_noise_scale = max(current_uniform_noise_scale, req.min_uniform_noise_scale)
+
+                if current_uniform_noise_scale > 0.0:
+                    noise = (torch.rand_like(req_logits) * 2 - 1) * current_uniform_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
             if req.prob_threshold_val > 0.0:
                 current_prob_threshold_val = req.prob_threshold_val
                 if req.prob_threshold_schedule == "linear":
