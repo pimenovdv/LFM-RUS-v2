@@ -2435,9 +2435,19 @@ class MDLMRequest:
     status: str = "pending"
     result: Optional[torch.Tensor] = None
     transfer_tokens: Optional[torch.Tensor] = None
+    repetition_penalty: float = 1.0
+    repetition_penalty_schedule: str = "constant"
+    min_repetition_penalty: float = 1.0
     repetition_decay: float = 0.0
     repetition_decay_schedule: str = "constant"
     min_repetition_decay: float = 0.0
+    frequency_penalty: float = 0.0
+    frequency_penalty_schedule: str = "constant"
+    min_frequency_penalty: float = 0.0
+    presence_penalty: float = 0.0
+    presence_penalty_schedule: str = "constant"
+    min_presence_penalty: float = 0.0
+    penalty_range: Optional[int] = None
     logits_momentum: float = 0.0
     logits_momentum_schedule: str = "constant"
     min_logits_momentum: float = 0.0
@@ -2642,6 +2652,89 @@ class MDLMContinuousBatchingManager:
 
                 if current_gaussian_noise_std > 0.0:
                     req_logits = req_logits + torch.randn_like(req_logits) * current_gaussian_noise_std
+
+            current_repetition_penalty = req.repetition_penalty
+            if req.repetition_penalty != 1.0 and req.repetition_penalty_schedule != "constant":
+                if req.repetition_penalty_schedule == "linear":
+                    current_repetition_penalty = req.repetition_penalty * (1.0 - step_ratio)
+                elif req.repetition_penalty_schedule == "cosine":
+                    current_repetition_penalty = req.repetition_penalty * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.repetition_penalty_schedule == "exponential":
+                    current_repetition_penalty = req.repetition_penalty * math.exp(-3.0 * step_ratio)
+                elif req.repetition_penalty_schedule == "cyclic":
+                    current_repetition_penalty = req.repetition_penalty * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+            current_repetition_penalty = max(current_repetition_penalty, req.min_repetition_penalty)
+
+            current_repetition_decay = req.repetition_decay
+            if req.repetition_decay != 0.0 and req.repetition_decay_schedule != "constant":
+                if req.repetition_decay_schedule == "linear":
+                    current_repetition_decay = req.repetition_decay * (1.0 - step_ratio)
+                elif req.repetition_decay_schedule == "cosine":
+                    current_repetition_decay = req.repetition_decay * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.repetition_decay_schedule == "exponential":
+                    current_repetition_decay = req.repetition_decay * math.exp(-3.0 * step_ratio)
+                elif req.repetition_decay_schedule == "cyclic":
+                    current_repetition_decay = req.repetition_decay * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+            current_repetition_decay = max(current_repetition_decay, req.min_repetition_decay)
+
+            current_frequency_penalty = req.frequency_penalty
+            if req.frequency_penalty != 0.0 and req.frequency_penalty_schedule != "constant":
+                if req.frequency_penalty_schedule == "linear":
+                    current_frequency_penalty = req.frequency_penalty * (1.0 - step_ratio)
+                elif req.frequency_penalty_schedule == "cosine":
+                    current_frequency_penalty = req.frequency_penalty * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.frequency_penalty_schedule == "exponential":
+                    current_frequency_penalty = req.frequency_penalty * math.exp(-3.0 * step_ratio)
+                elif req.frequency_penalty_schedule == "cyclic":
+                    current_frequency_penalty = req.frequency_penalty * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+            current_frequency_penalty = max(current_frequency_penalty, req.min_frequency_penalty)
+
+            current_presence_penalty = req.presence_penalty
+            if req.presence_penalty != 0.0 and req.presence_penalty_schedule != "constant":
+                if req.presence_penalty_schedule == "linear":
+                    current_presence_penalty = req.presence_penalty * (1.0 - step_ratio)
+                elif req.presence_penalty_schedule == "cosine":
+                    current_presence_penalty = req.presence_penalty * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.presence_penalty_schedule == "exponential":
+                    current_presence_penalty = req.presence_penalty * math.exp(-3.0 * step_ratio)
+                elif req.presence_penalty_schedule == "cyclic":
+                    current_presence_penalty = req.presence_penalty * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+            current_presence_penalty = max(current_presence_penalty, req.min_presence_penalty)
+
+            if (current_repetition_penalty != 1.0 or current_frequency_penalty != 0.0 or
+                current_presence_penalty != 0.0):
+
+                context_tokens = req.x[0, :req_len]
+                valid_context = context_tokens[context_tokens != mask_id]
+                if req.penalty_range is not None and req.penalty_range > 0:
+                    valid_context = valid_context[-req.penalty_range:]
+
+                if valid_context.numel() > 0:
+                    unique_tokens, counts = torch.unique(valid_context, return_counts=True)
+
+                    if current_repetition_penalty != 1.0:
+                        # Extract the slice to avoid in-place on expanded tensor warning
+                        score = req_logits[0, :, unique_tokens].clone()
+                        if current_repetition_decay > 0.0:
+                            # Vectorized distance calculation
+                            matches = valid_context.unsqueeze(0) == unique_tokens.unsqueeze(1)
+                            flipped_matches = matches.flip(dims=[1])
+                            distances = flipped_matches.float().argmax(dim=1).to(torch.float32)
+
+                            eff_penalty = 1.0 + (current_repetition_penalty - 1.0) * torch.exp(-current_repetition_decay * distances)
+                            eff_penalty = eff_penalty.unsqueeze(0)
+                            penalized_score = torch.where(score < 0, score * eff_penalty, score / eff_penalty)
+                        else:
+                            penalized_score = torch.where(score < 0, score * current_repetition_penalty, score / current_repetition_penalty)
+
+                        # Use torch.scatter or index manipulation to avoid warnings, but for simplicity
+                        # and since we clone, index_put is fine without expansion issues
+                        req_logits[0, :, unique_tokens] = penalized_score
+
+                    if current_frequency_penalty != 0.0 or current_presence_penalty != 0.0:
+                        penalty = (current_presence_penalty + counts.float() * current_frequency_penalty).unsqueeze(0)
+                        current_scores = req_logits[0, :, unique_tokens].clone()
+                        req_logits[0, :, unique_tokens] = current_scores - penalty.to(req_logits.device)
 
             M = req.transfer_tokens[0, req.current_step].item()
 
