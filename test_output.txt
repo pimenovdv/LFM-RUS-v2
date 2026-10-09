@@ -1,0 +1,139 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.13, pytest-9.0.3, pluggy-1.6.0
+rootdir: /app
+configfile: pyproject.toml
+plugins: mock-3.15.1, rerunfailures-16.3, cov-7.1.0, anyio-4.13.0, xdist-3.8.0, timeout-2.4.0
+collected 326 items
+
+tests/test_alignment.py ...................................              [ 10%]
+tests/test_continuous_batching.py ....                                   [ 11%]
+tests/test_cpt.py ...........                                            [ 15%]
+tests/test_data_prep.py ....                                             [ 16%]
+tests/test_diffusion.py ................................................ [ 31%]
+................                                                         [ 36%]
+tests/test_diffusion_classifier.py .                                     [ 36%]
+tests/test_diffusion_continuous_batching_sampling.py ..................  [ 42%]
+tests/test_diffusion_controlnet.py .....                                 [ 43%]
+tests/test_diffusion_cutoff_min_percent.py .                             [ 43%]
+tests/test_diffusion_dry_sampling.py .....                               [ 45%]
+tests/test_diffusion_dry_sampling_schedule.py .                          [ 45%]
+tests/test_diffusion_gaussian_noise.py ...                               [ 46%]
+tests/test_diffusion_logits_momentum.py ...                              [ 47%]
+tests/test_diffusion_min_p_schedule.py .                                 [ 47%]
+tests/test_diffusion_mirostat.py ..                                      [ 48%]
+tests/test_diffusion_moe.py ..                                           [ 49%]
+tests/test_diffusion_quantile.py .....                                   [ 50%]
+tests/test_diffusion_rank_penalty.py ...                                 [ 51%]
+tests/test_diffusion_self_conditioning.py ....                           [ 52%]
+tests/test_diffusion_steering.py ...                                     [ 53%]
+tests/test_diffusion_stochastic.py .....                                 [ 55%]
+tests/test_diffusion_thresholding.py ...                                 [ 56%]
+tests/test_diffusion_uniform_noise.py ...                                [ 57%]
+tests/test_diffusion_watermark.py .                                      [ 57%]
+tests/test_flow_matching.py ...                                          [ 58%]
+tests/test_iterative_dpo.py ..                                           [ 58%]
+tests/test_iterative_dpo_coverage.py ....                                [ 60%]
+tests/test_latent_diffusion.py ....                                      [ 61%]
+tests/test_mdlm_beam_search.py .                                         [ 61%]
+tests/test_mdlm_contrastive.py ..                                        [ 62%]
+tests/test_mdlm_flash_attention.py ...                                   [ 63%]
+tests/test_mdlm_generation.py ..................................         [ 73%]
+tests/test_mdlm_generation_coverage.py ...........................       [ 81%]
+tests/test_mdlm_rag.py ..                                                [ 82%]
+tests/test_mdlm_speculative.py ..                                        [ 83%]
+tests/test_pipeline_coverage.py .....                                    [ 84%]
+tests/test_pruning.py .                                                  [ 84%]
+tests/test_rewards.py ...........                                        [ 88%]
+tests/test_rewards_coverage.py .............                             [ 92%]
+tests/test_rlaif_coverage.py ....                                        [ 93%]
+tests/test_sft.py ......                                                 [ 95%]
+tests/test_task_sft.py ....                                              [ 96%]
+tests/test_tokenizer.py ..                                               [ 97%]
+tests/test_tokenizer_coverage.py ..                                      [ 97%]
+tests/test_vrpo.py ....                                                  [ 99%]
+tests/test_vrpo_coverage.py ...                                          [100%]
+
+=============================== warnings summary ===============================
+src/alignment/pipeline.py:6
+  /app/src/alignment/pipeline.py:6: TRLExperimentalWarning: You are importing from 'trl.experimental'. APIs here are unstable and may change or be removed without notice. Silence this warning by setting environment variable TRL_EXPERIMENTAL_SILENCE=1.
+    from trl.experimental.orpo import ORPOTrainer, ORPOConfig
+
+tests/test_alignment.py: 36 warnings
+tests/test_iterative_dpo.py: 1 warning
+tests/test_pruning.py: 2 warnings
+tests/test_sft.py: 1 warning
+tests/test_tokenizer.py: 1 warning
+  /app/.venv/lib/python3.12/site-packages/transformers/models/gpt2/tokenization_gpt2.py:110: DeprecationWarning: Deprecated in 0.9.0: BPE.__init__ will not create from files anymore, try `BPE.from_file` instead
+    BPE(
+
+tests/test_alignment.py::test_run_alignment_kto_dummy
+tests/test_alignment.py::test_run_alignment_kto_with_data
+  /app/src/alignment/pipeline.py:261: FutureWarning: The `KTOConfig` is now located in `trl.experimental`. Please update your imports to `from trl.experimental.kto import KTOConfig`. For more information, see https://github.com/huggingface/trl/issues/4223. Promoting KTO to the stable API is a high-priority task. Until then, this current path (`from trl import KTOConfig`) will remain, but API changes may occur.
+    kto_config = KTOConfig(
+
+tests/test_alignment.py::test_run_alignment_kto_dummy
+tests/test_alignment.py::test_run_alignment_kto_with_data
+  /app/src/alignment/pipeline.py:274: FutureWarning: The `KTOTrainer` is now located in `trl.experimental`. Please update your imports to `from trl.experimental.kto import KTOTrainer`. For more information, see https://github.com/huggingface/trl/issues/4223. Promoting KTO to the stable API is a high-priority task. Until then, this current path (`from trl import KTOTrainer`) will remain, but API changes may occur.
+    trainer = KTOTrainer(
+
+tests/test_cpt.py::test_run_cpt_dummy_data
+tests/test_cpt.py::test_run_cpt_embedding_warmup
+tests/test_cpt.py::test_run_cpt_wsd
+tests/test_cpt.py::test_run_cpt_block_diffusion
+tests/test_cpt.py::test_run_cpt_top_k_merge
+tests/test_cpt.py::test_run_cpt_lora
+  /app/.venv/lib/python3.12/site-packages/dill/_dill.py:423: PicklingWarning: Cannot locate reference to <class 'unittest.mock.MagicMock'>.
+    StockPickler.save(self, obj, save_persistent_id)
+
+tests/test_cpt.py::test_run_cpt_dummy_data
+tests/test_cpt.py::test_run_cpt_embedding_warmup
+tests/test_cpt.py::test_run_cpt_wsd
+tests/test_cpt.py::test_run_cpt_block_diffusion
+tests/test_cpt.py::test_run_cpt_top_k_merge
+tests/test_cpt.py::test_run_cpt_lora
+  /app/.venv/lib/python3.12/site-packages/dill/_dill.py:423: PicklingWarning: Cannot pickle <class 'unittest.mock.MagicMock'>: unittest.mock.MagicMock has recursive self-references that trigger a RecursionError.
+    StockPickler.save(self, obj, save_persistent_id)
+
+tests/test_diffusion_continuous_batching_sampling.py::test_continuous_batching_repetition_penalties
+  /app/src/models/diffusion/modeling_diffusion.py:2732: UserWarning: Use of index_put_ on expanded tensors is deprecated. Please clone() the tensor before performing this operation. This also applies to advanced indexing e.g. tensor[indices] = tensor (Triggered internally at /pytorch/aten/src/ATen/native/TensorAdvancedIndexing.cpp:967.)
+    req_logits[0, :, unique_tokens] = penalized_score
+
+tests/test_diffusion_continuous_batching_sampling.py::test_continuous_batching_repetition_penalties
+  /app/src/models/diffusion/modeling_diffusion.py:2737: UserWarning: Use of index_put_ on expanded tensors is deprecated. Please clone() the tensor before performing this operation. This also applies to advanced indexing e.g. tensor[indices] = tensor (Triggered internally at /pytorch/aten/src/ATen/native/TensorAdvancedIndexing.cpp:967.)
+    req_logits[0, :, unique_tokens] = current_scores - penalty.to(req_logits.device)
+
+tests/test_pipeline_coverage.py: 12 warnings
+  /app/.venv/lib/python3.12/site-packages/multiprocess/popen_fork.py:66: DeprecationWarning: This process (pid=93091) is multi-threaded, use of fork() may lead to deadlocks in the child.
+    self.pid = os.fork()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.13-final-0 _______________
+
+Name                                              Stmts   Miss  Cover   Missing
+-------------------------------------------------------------------------------
+src/__init__.py                                       0      0   100%
+src/alignment/__init__.py                             4      0   100%
+src/alignment/iterative_dpo.py                       51      0   100%
+src/alignment/pipeline.py                           257     27    89%   68-69, 74-75, 79-80, 216-219, 364-365, 401-404, 440, 565-570, 577-578, 582-585
+src/alignment/rejection_sampling.py                  60      0   100%
+src/alignment/rewards/__init__.py                     0      0   100%
+src/alignment/rewards/rewards.py                    103      3    97%   66, 148-149
+src/alignment/rlaif.py                               71      0   100%
+src/alignment/spin.py                                39      4    90%   41-45
+src/alignment/vrpo.py                                22      0   100%
+src/cpt.py                                          160      6    96%   25, 40-41, 120-121, 136
+src/data_prep/__init__.py                             0      0   100%
+src/data_prep/filters.py                            150      8    95%   36, 64, 112, 117, 123, 144, 218, 223
+src/data_prep/pipeline.py                            65      6    91%   82, 96, 180-183
+src/models/diffusion/__init__.py                      3      0   100%
+src/models/diffusion/configuration_diffusion.py      30      0   100%
+src/models/diffusion/modeling_diffusion.py         2158    121    94%   13-15, 124, 187, 207, 234, 320, 357, 365, 369, 443, 468, 474, 485, 501, 542, 562, 677, 958, 1033, 1078-1081, 1109, 1130-1132, 1180-1182, 1184, 1390, 1477, 1506, 1517, 1541, 1565, 1576-1578, 1581-1582, 1589, 2120-2121, 2181-2182, 2210, 2258, 2366, 2525, 2621, 2623, 2625, 2633-2635, 2637, 2646, 2648, 2650, 2672-2677, 2684-2689, 2696-2701, 2804, 2816-2817, 2819, 2831, 2835-2847, 2883, 2885, 2887, 2899, 2901, 2903, 2918, 2920, 2922, 2980, 2983-2986, 2989, 2992-2995, 3127, 3131, 3137, 3141, 3197-3198, 3237, 3264
+src/pruning.py                                       81      3    96%   81, 86, 89
+src/sft.py                                          128      7    95%   53-54, 82, 145, 155-156, 159
+src/task_sft.py                                      61      4    93%   35, 44-45, 48
+src/tokenizer.py                                     77      3    96%   135-137
+-------------------------------------------------------------------------------
+TOTAL                                              3520    192    95%
+Required test coverage of 90% reached. Total coverage: 94.55%
+================= 326 passed, 72 warnings in 428.63s (0:07:08) =================

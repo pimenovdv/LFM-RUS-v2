@@ -289,3 +289,26 @@ def test_continuous_batching_dynamic_temperature_entropy(mocker):
     assert len(results) == 6
     for res in results:
         assert isinstance(res, torch.Tensor)
+
+def test_continuous_batching_repetition_penalties(mocker):
+    model = get_mock_model(mocker)
+
+    requests = [
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "repetition_penalty": 1.5},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "repetition_penalty": 1.5, "repetition_penalty_schedule": "linear", "min_repetition_penalty": 1.0},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "repetition_penalty": 1.5, "repetition_penalty_schedule": "cosine", "min_repetition_penalty": 1.0},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "repetition_penalty": 1.5, "repetition_penalty_schedule": "exponential", "min_repetition_penalty": 1.0},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "repetition_penalty": 1.5, "repetition_penalty_schedule": "cyclic", "min_repetition_penalty": 1.0},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "repetition_penalty": 1.5, "repetition_decay": 0.1},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "repetition_penalty": 1.5, "repetition_decay": 0.1, "repetition_decay_schedule": "linear", "min_repetition_decay": 0.05},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "frequency_penalty": 0.5},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "frequency_penalty": 0.5, "frequency_penalty_schedule": "linear", "min_frequency_penalty": 0.1},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "presence_penalty": 0.5},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "presence_penalty": 0.5, "presence_penalty_schedule": "linear", "min_presence_penalty": 0.1},
+        {"input_ids": torch.tensor([[1, 2, 1, 2]]), "max_new_tokens": 1, "total_steps": 2, "repetition_penalty": 1.5, "penalty_range": 2},
+    ]
+
+    results = model.generate_dynamic_batch(requests)
+    assert len(results) == len(requests)
+    for res in results:
+        assert isinstance(res, torch.Tensor)
