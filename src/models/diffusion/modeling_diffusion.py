@@ -791,6 +791,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         rank_penalty: float = 0.0,
         rank_penalty_schedule: str = "constant",
         min_rank_penalty: float = 0.0,
+        smooth_k: int = 0,
+        smooth_k_alpha: float = 0.0,
+        smooth_k_schedule: str = "constant",
+        min_smooth_k_alpha: float = 0.0,
+        positional_temperature: float = 0.0,
+        positional_temperature_schedule: str = "constant",
+        min_positional_temperature: float = 0.0,
         prob_threshold_val: float = 0.0,
         prob_threshold_schedule: str = "constant",
         min_prob_threshold_val: float = 0.0,
@@ -1533,6 +1540,25 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     indices_to_remove = logits < torch.topk(logits, top_k_val, dim=-1)[0][..., -1, None]
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
 
+                current_smooth_k = smooth_k
+                current_smooth_k_alpha = smooth_k_alpha
+                if current_smooth_k > 0 and current_smooth_k_alpha > 0.0:
+                    if smooth_k_schedule == "linear":
+                        current_smooth_k_alpha = smooth_k_alpha * (1.0 - step_ratio)
+                    elif smooth_k_schedule == "cosine":
+                        current_smooth_k_alpha = smooth_k_alpha * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif smooth_k_schedule == "exponential":
+                        current_smooth_k_alpha = smooth_k_alpha * math.exp(-3.0 * step_ratio)
+                    elif smooth_k_schedule == "cyclic":
+                        current_smooth_k_alpha = smooth_k_alpha * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_smooth_k_alpha = max(current_smooth_k_alpha, min_smooth_k_alpha)
+
+                    if current_smooth_k_alpha > 0.0:
+                        smooth_k_val = min(max(current_smooth_k, 1), logits.size(-1))
+                        smooth_k_thresholds = torch.topk(logits, smooth_k_val, dim=-1)[0][..., -1, None]
+                        indices_to_smooth = logits < smooth_k_thresholds
+                        logits = torch.where(indices_to_smooth, logits - current_smooth_k_alpha, logits)
+
                 if no_repeat_ngram_size > 0:
                     for b in range(batch_size):
                         seq = x[b, :block_end]
@@ -2083,7 +2109,27 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     logits = logits_processor(x, logits)
 
                 current_temperature = temperature
-                if temperature > 0 or dynamic_temperature_entropy > 0:
+                if temperature > 0 or dynamic_temperature_entropy > 0 or positional_temperature > 0:
+                    if positional_temperature > 0.0:
+                        current_positional_temperature = positional_temperature
+                        if positional_temperature_schedule == "linear":
+                            current_positional_temperature = positional_temperature * (1.0 - step_ratio)
+                        elif positional_temperature_schedule == "cosine":
+                            current_positional_temperature = positional_temperature * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                        elif positional_temperature_schedule == "exponential":
+                            current_positional_temperature = positional_temperature * math.exp(-3.0 * step_ratio)
+                        elif positional_temperature_schedule == "cyclic":
+                            current_positional_temperature = positional_temperature * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                        current_positional_temperature = max(current_positional_temperature, min_positional_temperature)
+
+                        if current_positional_temperature > 0.0:
+                            seq_len = logits.size(1)
+                            positions = torch.arange(seq_len, device=logits.device, dtype=torch.float)
+                            relative_positions = positions / max(1, seq_len - 1)
+                            temp_scaling = 1.0 + current_positional_temperature * relative_positions
+                            temp_scaling = temp_scaling.unsqueeze(0).unsqueeze(-1)
+                            logits = logits / temp_scaling
+
                     if temperature_schedule == "linear":
                         current_temperature = temperature * (1.0 - step_ratio)
                     elif temperature_schedule == "cosine":
@@ -2479,6 +2525,13 @@ class MDLMRequest:
     rank_penalty: float = 0.0
     rank_penalty_schedule: str = "constant"
     min_rank_penalty: float = 0.0
+    smooth_k: int = 0
+    smooth_k_alpha: float = 0.0
+    smooth_k_schedule: str = "constant"
+    min_smooth_k_alpha: float = 0.0
+    positional_temperature: float = 0.0
+    positional_temperature_schedule: str = "constant"
+    min_positional_temperature: float = 0.0
     prob_threshold_val: float = 0.0
     prob_threshold_schedule: str = "constant"
     min_prob_threshold_val: float = 0.0
@@ -2754,6 +2807,24 @@ class MDLMContinuousBatchingManager:
                 top_k_vals, _ = torch.topk(req_logits, min(current_top_k, req_logits.size(-1)))
                 indices_to_remove = req_logits < top_k_vals[..., -1, None]
                 req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+
+            current_smooth_k = req.smooth_k
+            current_smooth_k_alpha = req.smooth_k_alpha
+            if current_smooth_k > 0 and current_smooth_k_alpha > 0.0:
+                if req.smooth_k_schedule == "linear":
+                    current_smooth_k_alpha = req.smooth_k_alpha * (1.0 - step_ratio)
+                elif req.smooth_k_schedule == "cosine":
+                    current_smooth_k_alpha = req.smooth_k_alpha * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.smooth_k_schedule == "exponential":
+                    current_smooth_k_alpha = req.smooth_k_alpha * math.exp(-3.0 * step_ratio)
+                elif req.smooth_k_schedule == "cyclic":
+                    current_smooth_k_alpha = req.smooth_k_alpha * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_smooth_k_alpha = max(current_smooth_k_alpha, req.min_smooth_k_alpha)
+
+                if current_smooth_k_alpha > 0.0:
+                    smooth_k_vals, _ = torch.topk(req_logits, min(current_smooth_k, req_logits.size(-1)))
+                    indices_to_smooth = req_logits < smooth_k_vals[..., -1, None]
+                    req_logits = torch.where(indices_to_smooth, req_logits - current_smooth_k_alpha, req_logits)
 
             current_top_p = req.top_p
             if req.top_p < 1.0:
@@ -3213,7 +3284,30 @@ class MDLMContinuousBatchingManager:
             current_gumbel_temperature = max(current_gumbel_temperature, req.min_gumbel_temperature)
 
             current_temperature = req.temperature
-            if req.temperature > 0 or req.dynamic_temperature_entropy > 0:
+            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.positional_temperature > 0:
+                if req.positional_temperature > 0.0:
+                    current_positional_temperature = req.positional_temperature
+                    if req.positional_temperature_schedule == "linear":
+                        current_positional_temperature = req.positional_temperature * (1.0 - step_ratio)
+                    elif req.positional_temperature_schedule == "cosine":
+                        current_positional_temperature = req.positional_temperature * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif req.positional_temperature_schedule == "exponential":
+                        current_positional_temperature = req.positional_temperature * math.exp(-3.0 * step_ratio)
+                    elif req.positional_temperature_schedule == "cyclic":
+                        current_positional_temperature = req.positional_temperature * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_positional_temperature = max(current_positional_temperature, req.min_positional_temperature)
+
+                    if current_positional_temperature > 0.0:
+                        # scale temperature linearly based on relative sequence position
+                        # we compute scaling for all tokens in req_logits
+                        # req_logits shape: (1, seq_len, vocab_size)
+                        seq_len = req_logits.size(1)
+                        positions = torch.arange(seq_len, device=req_logits.device, dtype=torch.float)
+                        relative_positions = positions / max(1, seq_len - 1)
+                        temp_scaling = 1.0 + current_positional_temperature * relative_positions
+                        temp_scaling = temp_scaling.unsqueeze(0).unsqueeze(-1)
+                        req_logits = req_logits / temp_scaling
+
                 if req.dynamic_temperature_entropy > 0.0:
                     current_dynamic_temperature_entropy = req.dynamic_temperature_entropy
                     if req.dynamic_temperature_entropy_schedule == "linear":

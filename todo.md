@@ -4,11 +4,12 @@
 
 ## [x] Завершенные этапы (Шаги 1-100)
 **Сжатое описание:**
-Реализована полнофункциональная интеграция MDLM, включая базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, Mixture of Experts (MoE), Retrieval-Augmented Generation (RAG), Continuous Time Diffusion, дистилляцию консистентности, Latent Masked Diffusion, Discrete Flow Matching, Contrastive Decoding, Mirostat Sampling, DRY Sampling, Min-K% Prob Sampling, XTC Sampling, Quantile Sampling, Thresholding Sampling, интеграцию различных вероятностных фильтров в механизм Continuous Batching (включая Rank Penalty Sampling), поддержку Logit Softcapping, Stochastic Unmasking и Uniform Noise Sampling.
+Реализована полнофункциональная интеграция MDLM, включая базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, Mixture of Experts (MoE), Retrieval-Augmented Generation (RAG), Continuous Time Diffusion, дистилляцию консистентности, Latent Masked Diffusion, Discrete Flow Matching, Contrastive Decoding, Mirostat Sampling, DRY Sampling, Min-K% Prob Sampling, XTC Sampling, Quantile Sampling, Thresholding Sampling, интеграцию различных вероятностных фильтров в механизм Continuous Batching (включая Rank Penalty Sampling), поддержку Logit Softcapping, Stochastic Unmasking, Uniform Noise Sampling, а также интеграцию Repetition, Frequency и Presence Penalties в механизм непрерывного батчинга.
 
-## [x] Шаг 101: Внедрение Repetition, Frequency и Presence Penalties в Continuous Batching
-**Цель:** Добавить поддержку стандартных штрафов за повторение (`repetition_penalty`, `frequency_penalty`, `presence_penalty`) в механизм непрерывного батчинга для обеспечения функционального паритета со стандартной генерацией.
+## [x] Шаг 102: Внедрение SmoothK Sampling и Positional Temperature в стандартную генерацию и Continuous Batching
+**Цель:** Добавить новые методы для повышения вариативности и управляемости генерации.
 **Детали:**
-- Добавить параметры `repetition_penalty`, `frequency_penalty`, `presence_penalty`, их динамические расписания, минимальные значения и параметр `penalty_range` в датакласс `MDLMRequest`.
-- В методе `MDLMContinuousBatchingManager.step()` извлекать токены контекста без учета маски и применять штрафы к `req_logits`.
-- Добавить тесты для проверки влияния добавленных штрафов.
+- **SmoothK Sampling** позволяет применять мягкий штраф к токенам вне top-k вместо жесткого отсечения (путем вычитания `smooth_k_alpha` из логитов). Добавить параметры `smooth_k`, `smooth_k_alpha`, `smooth_k_schedule`, `min_smooth_k_alpha`.
+- **Positional Temperature** позволяет линейно масштабировать температуру в зависимости от позиции токена в генерируемой последовательности. Добавить параметры `positional_temperature`, `positional_temperature_schedule`, `min_positional_temperature`.
+- Интегрировать новые функции в `MDLMContinuousBatchingManager.step()` и `DiffusionModelForConditionalGeneration.generate()`.
+- Покрыть новые возможности тестами в `tests/test_diffusion_smooth_k_positional_temp.py`.
