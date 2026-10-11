@@ -801,6 +801,16 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         prob_threshold_val: float = 0.0,
         prob_threshold_schedule: str = "constant",
         min_prob_threshold_val: float = 0.0,
+        cat_min_prob: float = 0.0,
+        cat_max_prob: float = 1.0,
+        cat_sharpen_factor: float = 1.0,
+        cat_flatten_factor: float = 1.0,
+        cat_schedule: str = "constant",
+        min_cat_sharpen_factor: float = 1.0,
+        min_cat_flatten_factor: float = 1.0,
+        token_drop_prob: float = 0.0,
+        token_drop_schedule: str = "constant",
+        min_token_drop_prob: float = 0.0,
         uniform_noise_scale: float = 0.0,
         uniform_noise_schedule: str = "constant",
         min_uniform_noise_scale: float = 0.0,
@@ -1445,6 +1455,26 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     # Protect max_probs from being removed to avoid NaN
                     indices_to_remove = (probs < current_prob_threshold_val) & (probs < max_probs)
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+
+                current_token_drop_prob = token_drop_prob
+                if token_drop_prob > 0.0:
+                    if token_drop_schedule == "linear":
+                        current_token_drop_prob = token_drop_prob * (1.0 - step_ratio)
+                    elif token_drop_schedule == "cosine":
+                        current_token_drop_prob = token_drop_prob * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif token_drop_schedule == "exponential":
+                        current_token_drop_prob = token_drop_prob * math.exp(-3.0 * step_ratio)
+                    elif token_drop_schedule == "cyclic":
+                        current_token_drop_prob = token_drop_prob * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_token_drop_prob = max(current_token_drop_prob, min_token_drop_prob)
+
+                    if current_token_drop_prob > 0.0:
+                        probs = torch.nn.functional.softmax(logits, dim=-1)
+                        max_probs, _ = probs.max(dim=-1, keepdim=True)
+                        drop_mask = torch.rand_like(logits) < current_token_drop_prob
+                        # Protect the max logit from being dropped
+                        drop_mask = drop_mask & (probs < max_probs)
+                        logits = logits.masked_fill(drop_mask, -float("Inf"))
 
                 current_rank_penalty = rank_penalty
                 if rank_penalty > 0.0:
@@ -2130,6 +2160,35 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                             temp_scaling = temp_scaling.unsqueeze(0).unsqueeze(-1)
                             logits = logits / temp_scaling
 
+                    current_cat_sharpen = cat_sharpen_factor
+                    current_cat_flatten = cat_flatten_factor
+                    if cat_sharpen_factor != 1.0 or cat_flatten_factor != 1.0:
+                        if cat_schedule == "linear":
+                            current_cat_sharpen = cat_sharpen_factor + (min_cat_sharpen_factor - cat_sharpen_factor) * step_ratio
+                            current_cat_flatten = cat_flatten_factor + (min_cat_flatten_factor - cat_flatten_factor) * step_ratio
+                        elif cat_schedule == "cosine":
+                            current_cat_sharpen = min_cat_sharpen_factor + (cat_sharpen_factor - min_cat_sharpen_factor) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                            current_cat_flatten = min_cat_flatten_factor + (cat_flatten_factor - min_cat_flatten_factor) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                        elif cat_schedule == "exponential":
+                            current_cat_sharpen = min_cat_sharpen_factor + (cat_sharpen_factor - min_cat_sharpen_factor) * math.exp(-3.0 * step_ratio)
+                            current_cat_flatten = min_cat_flatten_factor + (cat_flatten_factor - min_cat_flatten_factor) * math.exp(-3.0 * step_ratio)
+                        elif cat_schedule == "cyclic":
+                            current_cat_sharpen = min_cat_sharpen_factor + (cat_sharpen_factor - min_cat_sharpen_factor) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                            current_cat_flatten = min_cat_flatten_factor + (cat_flatten_factor - min_cat_flatten_factor) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                        probs = torch.nn.functional.softmax(logits, dim=-1)
+                        max_probs, _ = probs.max(dim=-1, keepdim=True)
+
+                        # Apply sharpening if unsure (max prob < cat_min_prob)
+                        sharpen_mask = max_probs < cat_min_prob
+                        if current_cat_sharpen != 1.0:
+                            logits = torch.where(sharpen_mask, logits * current_cat_sharpen, logits)
+
+                        # Apply flattening if too sure (max prob > cat_max_prob)
+                        flatten_mask = max_probs > cat_max_prob
+                        if current_cat_flatten != 1.0:
+                            logits = torch.where(flatten_mask, logits * current_cat_flatten, logits)
+
                     if temperature_schedule == "linear":
                         current_temperature = temperature * (1.0 - step_ratio)
                     elif temperature_schedule == "cosine":
@@ -2535,6 +2594,16 @@ class MDLMRequest:
     prob_threshold_val: float = 0.0
     prob_threshold_schedule: str = "constant"
     min_prob_threshold_val: float = 0.0
+    cat_min_prob: float = 0.0
+    cat_max_prob: float = 1.0
+    cat_sharpen_factor: float = 1.0
+    cat_flatten_factor: float = 1.0
+    cat_schedule: str = "constant"
+    min_cat_sharpen_factor: float = 1.0
+    min_cat_flatten_factor: float = 1.0
+    token_drop_prob: float = 0.0
+    token_drop_schedule: str = "constant"
+    min_token_drop_prob: float = 0.0
     uniform_noise_scale: float = 0.0
     uniform_noise_schedule: str = "constant"
     min_uniform_noise_scale: float = 0.0
@@ -2981,6 +3050,25 @@ class MDLMContinuousBatchingManager:
                     indices_to_remove = (probs < current_prob_threshold_val) & (probs < max_probs)
                     req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
 
+            current_token_drop_prob = req.token_drop_prob
+            if req.token_drop_prob > 0.0:
+                if req.token_drop_schedule == "linear":
+                    current_token_drop_prob = req.token_drop_prob * (1.0 - step_ratio)
+                elif req.token_drop_schedule == "cosine":
+                    current_token_drop_prob = req.token_drop_prob * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.token_drop_schedule == "exponential":
+                    current_token_drop_prob = req.token_drop_prob * math.exp(-3.0 * step_ratio)
+                elif req.token_drop_schedule == "cyclic":
+                    current_token_drop_prob = req.token_drop_prob * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_token_drop_prob = max(current_token_drop_prob, req.min_token_drop_prob)
+
+                if current_token_drop_prob > 0.0:
+                    probs = torch.nn.functional.softmax(req_logits, dim=-1)
+                    max_probs, _ = probs.max(dim=-1, keepdim=True)
+                    drop_mask = torch.rand_like(req_logits) < current_token_drop_prob
+                    drop_mask = drop_mask & (probs < max_probs)
+                    req_logits = req_logits.masked_fill(drop_mask, -float("Inf"))
+
             if req.rank_penalty > 0.0:
                 current_rank_penalty = req.rank_penalty
                 if req.rank_penalty_schedule == "linear":
@@ -3307,6 +3395,33 @@ class MDLMContinuousBatchingManager:
                         temp_scaling = 1.0 + current_positional_temperature * relative_positions
                         temp_scaling = temp_scaling.unsqueeze(0).unsqueeze(-1)
                         req_logits = req_logits / temp_scaling
+
+                current_cat_sharpen = req.cat_sharpen_factor
+                current_cat_flatten = req.cat_flatten_factor
+                if req.cat_sharpen_factor != 1.0 or req.cat_flatten_factor != 1.0:
+                    if req.cat_schedule == "linear":
+                        current_cat_sharpen = req.cat_sharpen_factor + (req.min_cat_sharpen_factor - req.cat_sharpen_factor) * step_ratio
+                        current_cat_flatten = req.cat_flatten_factor + (req.min_cat_flatten_factor - req.cat_flatten_factor) * step_ratio
+                    elif req.cat_schedule == "cosine":
+                        current_cat_sharpen = req.min_cat_sharpen_factor + (req.cat_sharpen_factor - req.min_cat_sharpen_factor) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                        current_cat_flatten = req.min_cat_flatten_factor + (req.cat_flatten_factor - req.min_cat_flatten_factor) * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif req.cat_schedule == "exponential":
+                        current_cat_sharpen = req.min_cat_sharpen_factor + (req.cat_sharpen_factor - req.min_cat_sharpen_factor) * math.exp(-3.0 * step_ratio)
+                        current_cat_flatten = req.min_cat_flatten_factor + (req.cat_flatten_factor - req.min_cat_flatten_factor) * math.exp(-3.0 * step_ratio)
+                    elif req.cat_schedule == "cyclic":
+                        current_cat_sharpen = req.min_cat_sharpen_factor + (req.cat_sharpen_factor - req.min_cat_sharpen_factor) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                        current_cat_flatten = req.min_cat_flatten_factor + (req.cat_flatten_factor - req.min_cat_flatten_factor) * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    probs = torch.nn.functional.softmax(req_logits, dim=-1)
+                    max_probs, _ = probs.max(dim=-1, keepdim=True)
+
+                    sharpen_mask = max_probs < req.cat_min_prob
+                    if current_cat_sharpen != 1.0:
+                        req_logits = torch.where(sharpen_mask, req_logits * current_cat_sharpen, req_logits)
+
+                    flatten_mask = max_probs > req.cat_max_prob
+                    if current_cat_flatten != 1.0:
+                        req_logits = torch.where(flatten_mask, req_logits * current_cat_flatten, req_logits)
 
                 if req.dynamic_temperature_entropy > 0.0:
                     current_dynamic_temperature_entropy = req.dynamic_temperature_entropy
