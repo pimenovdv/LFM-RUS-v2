@@ -811,6 +811,12 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         token_drop_prob: float = 0.0,
         token_drop_schedule: str = "constant",
         min_token_drop_prob: float = 0.0,
+        rank_based_sampling_alpha: float = 0.0,
+        rank_based_sampling_schedule: str = "constant",
+        min_rank_based_sampling_alpha: float = 0.0,
+        epsilon_greedy_prob: float = 0.0,
+        epsilon_greedy_schedule: str = "constant",
+        min_epsilon_greedy_prob: float = 0.0,
         uniform_noise_scale: float = 0.0,
         uniform_noise_schedule: str = "constant",
         min_uniform_noise_scale: float = 0.0,
@@ -2241,6 +2247,18 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 if current_gumbel_temperature is not None and not isinstance(current_gumbel_temperature, torch.Tensor):
                     current_gumbel_temperature = max(current_gumbel_temperature, min_gumbel_temperature)
 
+                current_epsilon_greedy = epsilon_greedy_prob
+                if epsilon_greedy_prob > 0.0:
+                    if epsilon_greedy_schedule == "linear":
+                        current_epsilon_greedy = epsilon_greedy_prob * (1.0 - step_ratio)
+                    elif epsilon_greedy_schedule == "cosine":
+                        current_epsilon_greedy = epsilon_greedy_prob * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif epsilon_greedy_schedule == "exponential":
+                        current_epsilon_greedy = epsilon_greedy_prob * math.exp(-3.0 * step_ratio)
+                    elif epsilon_greedy_schedule == "cyclic":
+                        current_epsilon_greedy = epsilon_greedy_prob * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_epsilon_greedy = max(current_epsilon_greedy, min_epsilon_greedy_prob)
+
                 if logit_smoothing > 0.0:
                     logits = logits * (1 - logit_smoothing) + logits.mean(dim=-1, keepdim=True) * logit_smoothing
 
@@ -2249,6 +2267,29 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                 if return_dict_in_generate and output_scores:
                     scores.append(logits.clone())
+
+                current_rank_alpha = rank_based_sampling_alpha
+                if rank_based_sampling_alpha > 0.0:
+                    if rank_based_sampling_schedule == "linear":
+                        current_rank_alpha = rank_based_sampling_alpha * (1.0 - step_ratio)
+                    elif rank_based_sampling_schedule == "cosine":
+                        current_rank_alpha = rank_based_sampling_alpha * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif rank_based_sampling_schedule == "exponential":
+                        current_rank_alpha = rank_based_sampling_alpha * math.exp(-3.0 * step_ratio)
+                    elif rank_based_sampling_schedule == "cyclic":
+                        current_rank_alpha = rank_based_sampling_alpha * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_rank_alpha = max(current_rank_alpha, min_rank_based_sampling_alpha)
+
+                    if current_rank_alpha > 0.0:
+                        sorted_logits, sorted_indices = torch.sort(logits, dim=-1, descending=True)
+                        ranks = torch.empty_like(sorted_indices)
+                        ranks.scatter_(-1, sorted_indices, torch.arange(logits.size(-1), device=logits.device).unsqueeze(0).expand_as(logits))
+                        ranks = ranks.float() + 1.0
+
+                        rank_probs = 1.0 / (ranks ** current_rank_alpha)
+                        valid_mask = logits != -float('inf')
+                        rank_logits = torch.log(rank_probs + 1e-10)
+                        logits = torch.where(valid_mask, rank_logits, logits)
 
                 current_mirostat_tau = mirostat_tau
                 current_mirostat_eta = mirostat_eta
@@ -2291,17 +2332,23 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 # Check if current_temperature is > 0 (can be a tensor or float)
                 is_temp_positive = (current_gumbel_temperature > 0).any() if isinstance(current_gumbel_temperature, torch.Tensor) else (current_gumbel_temperature > 0)
 
-                if is_temp_positive:
+                if current_epsilon_greedy > 0.0 and torch.rand(1).item() < current_epsilon_greedy:
+                    valid_mask = logits != -float('inf')
+                    random_logits = torch.where(valid_mask, torch.ones_like(logits), torch.zeros_like(logits))
+                    reshaped_probs = random_logits.view(-1, random_logits.size(-1))
+                    reshaped_probs = reshaped_probs + 1e-9
+                    x0 = torch.multinomial(reshaped_probs, num_samples=1).view(logits.size(0), logits.size(1))
+                elif is_temp_positive:
                     logits_f = logits.to(torch.float32)
                     noise = torch.rand_like(logits_f)
                     gumbel_noise = (-torch.log(noise.clamp(min=1e-9))) ** current_gumbel_temperature
 
                     # For masked items, logits is -inf, so exp() is 0. 0 / gumbel_noise is 0.
                     logits_with_noise = logits_f.exp() / gumbel_noise
+                    x0 = torch.argmax(logits_with_noise, dim=-1)
                 else:
                     logits_with_noise = logits
-
-                x0 = torch.argmax(logits_with_noise, dim=-1)
+                    x0 = torch.argmax(logits_with_noise, dim=-1)
 
                 if mirostat_mode == 1:
                     # Calculate surprise based on the original logits, not the masked ones
@@ -2604,6 +2651,12 @@ class MDLMRequest:
     token_drop_prob: float = 0.0
     token_drop_schedule: str = "constant"
     min_token_drop_prob: float = 0.0
+    rank_based_sampling_alpha: float = 0.0
+    rank_based_sampling_schedule: str = "constant"
+    min_rank_based_sampling_alpha: float = 0.0
+    epsilon_greedy_prob: float = 0.0
+    epsilon_greedy_schedule: str = "constant"
+    min_epsilon_greedy_prob: float = 0.0
     uniform_noise_scale: float = 0.0
     uniform_noise_schedule: str = "constant"
     min_uniform_noise_scale: float = 0.0
@@ -3344,6 +3397,29 @@ class MDLMContinuousBatchingManager:
                 if req.mirostat_mu is None:
                     req.mirostat_mu = current_mirostat_tau * 2.0
 
+            current_rank_alpha = req.rank_based_sampling_alpha
+            if req.rank_based_sampling_alpha > 0.0:
+                if req.rank_based_sampling_schedule == "linear":
+                    current_rank_alpha = req.rank_based_sampling_alpha * (1.0 - step_ratio)
+                elif req.rank_based_sampling_schedule == "cosine":
+                    current_rank_alpha = req.rank_based_sampling_alpha * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.rank_based_sampling_schedule == "exponential":
+                    current_rank_alpha = req.rank_based_sampling_alpha * math.exp(-3.0 * step_ratio)
+                elif req.rank_based_sampling_schedule == "cyclic":
+                    current_rank_alpha = req.rank_based_sampling_alpha * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_rank_alpha = max(current_rank_alpha, req.min_rank_based_sampling_alpha)
+
+                if current_rank_alpha > 0.0:
+                    sorted_logits, sorted_indices = torch.sort(req_logits, dim=-1, descending=True)
+                    ranks = torch.empty_like(sorted_indices)
+                    ranks.scatter_(-1, sorted_indices, torch.arange(req_logits.size(-1), device=req_logits.device).unsqueeze(0).expand_as(req_logits))
+                    ranks = ranks.float() + 1.0
+
+                    rank_probs = 1.0 / (ranks ** current_rank_alpha)
+                    valid_mask = req_logits != -float('inf')
+                    rank_logits = torch.log(rank_probs + 1e-10)
+                    req_logits = torch.where(valid_mask, rank_logits, req_logits)
+
             original_req_logits_for_mirostat = None
             if req.mirostat_mode == 1:
                 original_req_logits_for_mirostat = req_logits.clone()
@@ -3370,6 +3446,18 @@ class MDLMContinuousBatchingManager:
                 elif req.gumbel_temperature_schedule == "cyclic":
                     current_gumbel_temperature = gumbel_t * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
             current_gumbel_temperature = max(current_gumbel_temperature, req.min_gumbel_temperature)
+
+            current_epsilon_greedy = req.epsilon_greedy_prob
+            if req.epsilon_greedy_prob > 0.0:
+                if req.epsilon_greedy_schedule == "linear":
+                    current_epsilon_greedy = req.epsilon_greedy_prob * (1.0 - step_ratio)
+                elif req.epsilon_greedy_schedule == "cosine":
+                    current_epsilon_greedy = req.epsilon_greedy_prob * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.epsilon_greedy_schedule == "exponential":
+                    current_epsilon_greedy = req.epsilon_greedy_prob * math.exp(-3.0 * step_ratio)
+                elif req.epsilon_greedy_schedule == "cyclic":
+                    current_epsilon_greedy = req.epsilon_greedy_prob * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_epsilon_greedy = max(current_epsilon_greedy, req.min_epsilon_greedy_prob)
 
             current_temperature = req.temperature
             if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.positional_temperature > 0:
@@ -3445,7 +3533,13 @@ class MDLMContinuousBatchingManager:
                     else:
                         current_temperature = max(current_temperature, 1e-5)
 
-            if (req.temperature > 0 or req.dynamic_temperature_entropy > 0) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
+            if current_epsilon_greedy > 0.0 and torch.rand(1).item() < current_epsilon_greedy:
+                valid_mask = req_logits != -float('inf')
+                random_logits = torch.where(valid_mask, torch.ones_like(req_logits), torch.zeros_like(req_logits))
+                reshaped_probs = random_logits.view(-1, random_logits.size(-1))
+                reshaped_probs = reshaped_probs + 1e-9
+                x0 = torch.multinomial(reshaped_probs, num_samples=1).view(req_logits.size(0), req_logits.size(1))
+            elif (req.temperature > 0 or req.dynamic_temperature_entropy > 0) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
                 # Standard multinomial sampling if gumbel is explicitly disabled or we use fallback standard temp logic
                 req_logits = req_logits / current_temperature
                 probs = F.softmax(req_logits, dim=-1)
