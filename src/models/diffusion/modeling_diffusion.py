@@ -820,6 +820,12 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         uniform_noise_scale: float = 0.0,
         uniform_noise_schedule: str = "constant",
         min_uniform_noise_scale: float = 0.0,
+        laplacian_noise_scale: float = 0.0,
+        laplacian_noise_schedule: str = "constant",
+        min_laplacian_noise_scale: float = 0.0,
+        cauchy_noise_scale: float = 0.0,
+        cauchy_noise_schedule: str = "constant",
+        min_cauchy_noise_scale: float = 0.0,
         top_n_tokens: int = 0,
         top_n_tokens_schedule: str = "constant",
         min_top_n_tokens: int = 0,
@@ -1842,6 +1848,40 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = (torch.rand_like(logits) * 2 - 1) * current_uniform_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
+                current_laplacian_noise_scale = laplacian_noise_scale
+                if laplacian_noise_scale > 0.0:
+                    if laplacian_noise_schedule == "linear":
+                        current_laplacian_noise_scale = laplacian_noise_scale * (1.0 - step_ratio)
+                    elif laplacian_noise_schedule == "cosine":
+                        current_laplacian_noise_scale = laplacian_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif laplacian_noise_schedule == "exponential":
+                        current_laplacian_noise_scale = laplacian_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif laplacian_noise_schedule == "cyclic":
+                        current_laplacian_noise_scale = laplacian_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_laplacian_noise_scale = max(current_laplacian_noise_scale, min_laplacian_noise_scale)
+
+                if current_laplacian_noise_scale > 0.0:
+                    laplace_dist = torch.distributions.laplace.Laplace(0, 1)
+                    noise = laplace_dist.sample(logits.shape).to(logits.device) * current_laplacian_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
+                current_cauchy_noise_scale = cauchy_noise_scale
+                if cauchy_noise_scale > 0.0:
+                    if cauchy_noise_schedule == "linear":
+                        current_cauchy_noise_scale = cauchy_noise_scale * (1.0 - step_ratio)
+                    elif cauchy_noise_schedule == "cosine":
+                        current_cauchy_noise_scale = cauchy_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif cauchy_noise_schedule == "exponential":
+                        current_cauchy_noise_scale = cauchy_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif cauchy_noise_schedule == "cyclic":
+                        current_cauchy_noise_scale = cauchy_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_cauchy_noise_scale = max(current_cauchy_noise_scale, min_cauchy_noise_scale)
+
+                if current_cauchy_noise_scale > 0.0:
+                    cauchy_dist = torch.distributions.cauchy.Cauchy(0, 1)
+                    noise = cauchy_dist.sample(logits.shape).to(logits.device) * current_cauchy_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
                 current_top_n_tokens = top_n_tokens
                 if top_n_tokens > 0:
                     if top_n_tokens_schedule == "linear":
@@ -2660,6 +2700,12 @@ class MDLMRequest:
     uniform_noise_scale: float = 0.0
     uniform_noise_schedule: str = "constant"
     min_uniform_noise_scale: float = 0.0
+    laplacian_noise_scale: float = 0.0
+    laplacian_noise_schedule: str = "constant"
+    min_laplacian_noise_scale: float = 0.0
+    cauchy_noise_scale: float = 0.0
+    cauchy_noise_schedule: str = "constant"
+    min_cauchy_noise_scale: float = 0.0
     top_a: float = 0.0
     top_a_schedule: str = "constant"
     min_top_a: float = 0.0
@@ -3082,6 +3128,40 @@ class MDLMContinuousBatchingManager:
 
                 if current_uniform_noise_scale > 0.0:
                     noise = (torch.rand_like(req_logits) * 2 - 1) * current_uniform_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.laplacian_noise_scale > 0.0:
+                current_laplacian_noise_scale = req.laplacian_noise_scale
+                if req.laplacian_noise_schedule == "linear":
+                    current_laplacian_noise_scale = req.laplacian_noise_scale * (1.0 - step_ratio)
+                elif req.laplacian_noise_schedule == "cosine":
+                    current_laplacian_noise_scale = req.laplacian_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.laplacian_noise_schedule == "exponential":
+                    current_laplacian_noise_scale = req.laplacian_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.laplacian_noise_schedule == "cyclic":
+                    current_laplacian_noise_scale = req.laplacian_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_laplacian_noise_scale = max(current_laplacian_noise_scale, req.min_laplacian_noise_scale)
+
+                if current_laplacian_noise_scale > 0.0:
+                    laplace_dist = torch.distributions.laplace.Laplace(0, 1)
+                    noise = laplace_dist.sample(req_logits.shape).to(req_logits.device) * current_laplacian_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.cauchy_noise_scale > 0.0:
+                current_cauchy_noise_scale = req.cauchy_noise_scale
+                if req.cauchy_noise_schedule == "linear":
+                    current_cauchy_noise_scale = req.cauchy_noise_scale * (1.0 - step_ratio)
+                elif req.cauchy_noise_schedule == "cosine":
+                    current_cauchy_noise_scale = req.cauchy_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.cauchy_noise_schedule == "exponential":
+                    current_cauchy_noise_scale = req.cauchy_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.cauchy_noise_schedule == "cyclic":
+                    current_cauchy_noise_scale = req.cauchy_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_cauchy_noise_scale = max(current_cauchy_noise_scale, req.min_cauchy_noise_scale)
+
+                if current_cauchy_noise_scale > 0.0:
+                    cauchy_dist = torch.distributions.cauchy.Cauchy(0, 1)
+                    noise = cauchy_dist.sample(req_logits.shape).to(req_logits.device) * current_cauchy_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
             if req.prob_threshold_val > 0.0:
