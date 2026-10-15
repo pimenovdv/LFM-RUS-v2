@@ -826,6 +826,14 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         cauchy_noise_scale: float = 0.0,
         cauchy_noise_schedule: str = "constant",
         min_cauchy_noise_scale: float = 0.0,
+        student_t_noise_scale: float = 0.0,
+        student_t_df: float = 1.0,
+        student_t_noise_schedule: str = "constant",
+        min_student_t_noise_scale: float = 0.0,
+        pareto_noise_scale: float = 0.0,
+        pareto_alpha: float = 1.0,
+        pareto_noise_schedule: str = "constant",
+        min_pareto_noise_scale: float = 0.0,
         top_n_tokens: int = 0,
         top_n_tokens_schedule: str = "constant",
         min_top_n_tokens: int = 0,
@@ -1882,6 +1890,40 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = cauchy_dist.sample(logits.shape).to(logits.device) * current_cauchy_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
+                current_student_t_noise_scale = student_t_noise_scale
+                if student_t_noise_scale > 0.0:
+                    if student_t_noise_schedule == "linear":
+                        current_student_t_noise_scale = student_t_noise_scale * (1.0 - step_ratio)
+                    elif student_t_noise_schedule == "cosine":
+                        current_student_t_noise_scale = student_t_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif student_t_noise_schedule == "exponential":
+                        current_student_t_noise_scale = student_t_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif student_t_noise_schedule == "cyclic":
+                        current_student_t_noise_scale = student_t_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_student_t_noise_scale = max(current_student_t_noise_scale, min_student_t_noise_scale)
+
+                if current_student_t_noise_scale > 0.0:
+                    student_t_dist = torch.distributions.studentT.StudentT(student_t_df)
+                    noise = student_t_dist.sample(logits.shape).to(logits.device) * current_student_t_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
+                current_pareto_noise_scale = pareto_noise_scale
+                if pareto_noise_scale > 0.0:
+                    if pareto_noise_schedule == "linear":
+                        current_pareto_noise_scale = pareto_noise_scale * (1.0 - step_ratio)
+                    elif pareto_noise_schedule == "cosine":
+                        current_pareto_noise_scale = pareto_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif pareto_noise_schedule == "exponential":
+                        current_pareto_noise_scale = pareto_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif pareto_noise_schedule == "cyclic":
+                        current_pareto_noise_scale = pareto_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_pareto_noise_scale = max(current_pareto_noise_scale, min_pareto_noise_scale)
+
+                if current_pareto_noise_scale > 0.0:
+                    pareto_dist = torch.distributions.pareto.Pareto(scale=1.0, alpha=pareto_alpha)
+                    noise = pareto_dist.sample(logits.shape).to(logits.device) * current_pareto_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
                 current_top_n_tokens = top_n_tokens
                 if top_n_tokens > 0:
                     if top_n_tokens_schedule == "linear":
@@ -2706,6 +2748,14 @@ class MDLMRequest:
     cauchy_noise_scale: float = 0.0
     cauchy_noise_schedule: str = "constant"
     min_cauchy_noise_scale: float = 0.0
+    student_t_noise_scale: float = 0.0
+    student_t_df: float = 1.0
+    student_t_noise_schedule: str = "constant"
+    min_student_t_noise_scale: float = 0.0
+    pareto_noise_scale: float = 0.0
+    pareto_alpha: float = 1.0
+    pareto_noise_schedule: str = "constant"
+    min_pareto_noise_scale: float = 0.0
     top_a: float = 0.0
     top_a_schedule: str = "constant"
     min_top_a: float = 0.0
@@ -3162,6 +3212,40 @@ class MDLMContinuousBatchingManager:
                 if current_cauchy_noise_scale > 0.0:
                     cauchy_dist = torch.distributions.cauchy.Cauchy(0, 1)
                     noise = cauchy_dist.sample(req_logits.shape).to(req_logits.device) * current_cauchy_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.student_t_noise_scale > 0.0:
+                current_student_t_noise_scale = req.student_t_noise_scale
+                if req.student_t_noise_schedule == "linear":
+                    current_student_t_noise_scale = req.student_t_noise_scale * (1.0 - step_ratio)
+                elif req.student_t_noise_schedule == "cosine":
+                    current_student_t_noise_scale = req.student_t_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.student_t_noise_schedule == "exponential":
+                    current_student_t_noise_scale = req.student_t_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.student_t_noise_schedule == "cyclic":
+                    current_student_t_noise_scale = req.student_t_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_student_t_noise_scale = max(current_student_t_noise_scale, req.min_student_t_noise_scale)
+
+                if current_student_t_noise_scale > 0.0:
+                    student_t_dist = torch.distributions.studentT.StudentT(req.student_t_df)
+                    noise = student_t_dist.sample(req_logits.shape).to(req_logits.device) * current_student_t_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.pareto_noise_scale > 0.0:
+                current_pareto_noise_scale = req.pareto_noise_scale
+                if req.pareto_noise_schedule == "linear":
+                    current_pareto_noise_scale = req.pareto_noise_scale * (1.0 - step_ratio)
+                elif req.pareto_noise_schedule == "cosine":
+                    current_pareto_noise_scale = req.pareto_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.pareto_noise_schedule == "exponential":
+                    current_pareto_noise_scale = req.pareto_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.pareto_noise_schedule == "cyclic":
+                    current_pareto_noise_scale = req.pareto_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_pareto_noise_scale = max(current_pareto_noise_scale, req.min_pareto_noise_scale)
+
+                if current_pareto_noise_scale > 0.0:
+                    pareto_dist = torch.distributions.pareto.Pareto(scale=1.0, alpha=req.pareto_alpha)
+                    noise = pareto_dist.sample(req_logits.shape).to(req_logits.device) * current_pareto_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
             if req.prob_threshold_val > 0.0:
