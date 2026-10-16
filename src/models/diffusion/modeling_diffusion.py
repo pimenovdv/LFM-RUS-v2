@@ -834,6 +834,12 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         pareto_alpha: float = 1.0,
         pareto_noise_schedule: str = "constant",
         min_pareto_noise_scale: float = 0.0,
+        gaussian_logit_noise_scale: float = 0.0,
+        gaussian_logit_noise_schedule: str = "constant",
+        min_gaussian_logit_noise_scale: float = 0.0,
+        gumbel_logit_noise_scale: float = 0.0,
+        gumbel_logit_noise_schedule: str = "constant",
+        min_gumbel_logit_noise_scale: float = 0.0,
         top_n_tokens: int = 0,
         top_n_tokens_schedule: str = "constant",
         min_top_n_tokens: int = 0,
@@ -2329,6 +2335,39 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                 if current_gumbel_temperature is not None and not isinstance(current_gumbel_temperature, torch.Tensor):
                     current_gumbel_temperature = max(current_gumbel_temperature, min_gumbel_temperature)
 
+                # Gaussian Logit Noising
+                current_gaussian_logit_noise_scale = gaussian_logit_noise_scale
+                if gaussian_logit_noise_scale > 0.0 and gaussian_logit_noise_schedule != "constant":
+                    if gaussian_logit_noise_schedule == "linear":
+                        current_gaussian_logit_noise_scale = gaussian_logit_noise_scale * (1.0 - step_ratio)
+                    elif gaussian_logit_noise_schedule == "cosine":
+                        current_gaussian_logit_noise_scale = gaussian_logit_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif gaussian_logit_noise_schedule == "exponential":
+                        current_gaussian_logit_noise_scale = gaussian_logit_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif gaussian_logit_noise_schedule == "cyclic":
+                        current_gaussian_logit_noise_scale = gaussian_logit_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_gaussian_logit_noise_scale = max(current_gaussian_logit_noise_scale, min_gaussian_logit_noise_scale)
+
+                if current_gaussian_logit_noise_scale > 0.0:
+                    logits = logits + torch.randn_like(logits) * current_gaussian_logit_noise_scale
+
+                # Gumbel Logit Noising
+                current_gumbel_logit_noise_scale = gumbel_logit_noise_scale
+                if gumbel_logit_noise_scale > 0.0 and gumbel_logit_noise_schedule != "constant":
+                    if gumbel_logit_noise_schedule == "linear":
+                        current_gumbel_logit_noise_scale = gumbel_logit_noise_scale * (1.0 - step_ratio)
+                    elif gumbel_logit_noise_schedule == "cosine":
+                        current_gumbel_logit_noise_scale = gumbel_logit_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif gumbel_logit_noise_schedule == "exponential":
+                        current_gumbel_logit_noise_scale = gumbel_logit_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif gumbel_logit_noise_schedule == "cyclic":
+                        current_gumbel_logit_noise_scale = gumbel_logit_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_gumbel_logit_noise_scale = max(current_gumbel_logit_noise_scale, min_gumbel_logit_noise_scale)
+
+                if current_gumbel_logit_noise_scale > 0.0:
+                    gumbel_noise = -torch.log(-torch.log(torch.rand_like(logits).clamp(min=1e-9)))
+                    logits = logits + gumbel_noise * current_gumbel_logit_noise_scale
+
                 current_epsilon_greedy = epsilon_greedy_prob
                 if epsilon_greedy_prob > 0.0:
                     if epsilon_greedy_schedule == "linear":
@@ -2756,6 +2795,12 @@ class MDLMRequest:
     pareto_alpha: float = 1.0
     pareto_noise_schedule: str = "constant"
     min_pareto_noise_scale: float = 0.0
+    gaussian_logit_noise_scale: float = 0.0
+    gaussian_logit_noise_schedule: str = "constant"
+    min_gaussian_logit_noise_scale: float = 0.0
+    gumbel_logit_noise_scale: float = 0.0
+    gumbel_logit_noise_schedule: str = "constant"
+    min_gumbel_logit_noise_scale: float = 0.0
     top_a: float = 0.0
     top_a_schedule: str = "constant"
     min_top_a: float = 0.0
@@ -3196,6 +3241,39 @@ class MDLMContinuousBatchingManager:
                     laplace_dist = torch.distributions.laplace.Laplace(0, 1)
                     noise = laplace_dist.sample(req_logits.shape).to(req_logits.device) * current_laplacian_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            # Gaussian Logit Noising
+            current_gaussian_logit_noise_scale = req.gaussian_logit_noise_scale
+            if req.gaussian_logit_noise_scale > 0.0 and req.gaussian_logit_noise_schedule != "constant":
+                if req.gaussian_logit_noise_schedule == "linear":
+                    current_gaussian_logit_noise_scale = req.gaussian_logit_noise_scale * (1.0 - step_ratio)
+                elif req.gaussian_logit_noise_schedule == "cosine":
+                    current_gaussian_logit_noise_scale = req.gaussian_logit_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.gaussian_logit_noise_schedule == "exponential":
+                    current_gaussian_logit_noise_scale = req.gaussian_logit_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.gaussian_logit_noise_schedule == "cyclic":
+                    current_gaussian_logit_noise_scale = req.gaussian_logit_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+            current_gaussian_logit_noise_scale = max(current_gaussian_logit_noise_scale, req.min_gaussian_logit_noise_scale)
+
+            if current_gaussian_logit_noise_scale > 0.0:
+                req_logits = req_logits + torch.randn_like(req_logits) * current_gaussian_logit_noise_scale
+
+            # Gumbel Logit Noising
+            current_gumbel_logit_noise_scale = req.gumbel_logit_noise_scale
+            if req.gumbel_logit_noise_scale > 0.0 and req.gumbel_logit_noise_schedule != "constant":
+                if req.gumbel_logit_noise_schedule == "linear":
+                    current_gumbel_logit_noise_scale = req.gumbel_logit_noise_scale * (1.0 - step_ratio)
+                elif req.gumbel_logit_noise_schedule == "cosine":
+                    current_gumbel_logit_noise_scale = req.gumbel_logit_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.gumbel_logit_noise_schedule == "exponential":
+                    current_gumbel_logit_noise_scale = req.gumbel_logit_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.gumbel_logit_noise_schedule == "cyclic":
+                    current_gumbel_logit_noise_scale = req.gumbel_logit_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+            current_gumbel_logit_noise_scale = max(current_gumbel_logit_noise_scale, req.min_gumbel_logit_noise_scale)
+
+            if current_gumbel_logit_noise_scale > 0.0:
+                gumbel_noise = -torch.log(-torch.log(torch.rand_like(req_logits).clamp(min=1e-9)))
+                req_logits = req_logits + gumbel_noise * current_gumbel_logit_noise_scale
 
             if req.cauchy_noise_scale > 0.0:
                 current_cauchy_noise_scale = req.cauchy_noise_scale

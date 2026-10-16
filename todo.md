@@ -6,7 +6,7 @@
 **Сжатое описание:**
 Реализована полнофункциональная интеграция MDLM. Включает базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, MoE, RAG, Continuous Time Diffusion, дистилляцию консистентности, Latent Masked Diffusion, Discrete Flow Matching, Contrastive Decoding, Mirostat, DRY Sampling, Min-K%, XTC, Quantile, Thresholding, вероятностные фильтры для Continuous Batching, Logit Softcapping, Stochastic Unmasking, Uniform/Laplacian/Cauchy Noise, Penalties, SmoothK, Positional Temperature, Confidence-Aware Temperature (CAT), Token Drop Sampling (TDS), Rank-Based Sampling, Epsilon-Greedy Sampling, Student-T Noise Injection и Pareto Noise Injection Sampling.
 
-## [ ] Шаг 107: Внедрение Logit Noising Sampling (Gaussian и Gumbel)
+## [x] Шаг 107: Внедрение Logit Noising Sampling (Gaussian и Gumbel)
 **Цель:** Добавить новые методы вероятностного зашумления логитов на основе Гауссова распределения (Gaussian Logit Noising) и распределения Гамбеля (Gumbel Logit Noising) для управления вариативностью генерации.
 **Детали:**
 - **Gaussian Logit Noising:** Внедрение шума из нормального (Гауссова) распределения напрямую в логиты.
