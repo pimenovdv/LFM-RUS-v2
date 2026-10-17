@@ -830,6 +830,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         student_t_df: float = 1.0,
         student_t_noise_schedule: str = "constant",
         min_student_t_noise_scale: float = 0.0,
+        logistic_noise_scale: float = 0.0,
+        logistic_noise_schedule: str = "constant",
+        min_logistic_noise_scale: float = 0.0,
+        weibull_noise_scale: float = 0.0,
+        weibull_noise_shape: float = 1.0,
+        weibull_noise_schedule: str = "constant",
+        min_weibull_noise_scale: float = 0.0,
         pareto_noise_scale: float = 0.0,
         pareto_alpha: float = 1.0,
         pareto_noise_schedule: str = "constant",
@@ -1913,6 +1920,41 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = student_t_dist.sample(logits.shape).to(logits.device) * current_student_t_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
+                current_logistic_noise_scale = logistic_noise_scale
+                if logistic_noise_scale > 0.0:
+                    if logistic_noise_schedule == "linear":
+                        current_logistic_noise_scale = logistic_noise_scale * (1.0 - step_ratio)
+                    elif logistic_noise_schedule == "cosine":
+                        current_logistic_noise_scale = logistic_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif logistic_noise_schedule == "exponential":
+                        current_logistic_noise_scale = logistic_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif logistic_noise_schedule == "cyclic":
+                        current_logistic_noise_scale = logistic_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_logistic_noise_scale = max(current_logistic_noise_scale, min_logistic_noise_scale)
+
+                if current_logistic_noise_scale > 0.0:
+                    u = torch.rand(logits.shape, device=logits.device)
+                    # Logistic noise via inverse transform sampling
+                    noise = current_logistic_noise_scale * torch.log(u / (1.0 - u))
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
+                current_weibull_noise_scale = weibull_noise_scale
+                if weibull_noise_scale > 0.0:
+                    if weibull_noise_schedule == "linear":
+                        current_weibull_noise_scale = weibull_noise_scale * (1.0 - step_ratio)
+                    elif weibull_noise_schedule == "cosine":
+                        current_weibull_noise_scale = weibull_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif weibull_noise_schedule == "exponential":
+                        current_weibull_noise_scale = weibull_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif weibull_noise_schedule == "cyclic":
+                        current_weibull_noise_scale = weibull_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_weibull_noise_scale = max(current_weibull_noise_scale, min_weibull_noise_scale)
+
+                if current_weibull_noise_scale > 0.0:
+                    weibull_dist = torch.distributions.weibull.Weibull(scale=1.0, concentration=weibull_noise_shape)
+                    noise = weibull_dist.sample(logits.shape).to(logits.device) * current_weibull_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
                 current_pareto_noise_scale = pareto_noise_scale
                 if pareto_noise_scale > 0.0:
                     if pareto_noise_schedule == "linear":
@@ -2791,6 +2833,13 @@ class MDLMRequest:
     student_t_df: float = 1.0
     student_t_noise_schedule: str = "constant"
     min_student_t_noise_scale: float = 0.0
+    logistic_noise_scale: float = 0.0
+    logistic_noise_schedule: str = "constant"
+    min_logistic_noise_scale: float = 0.0
+    weibull_noise_scale: float = 0.0
+    weibull_noise_shape: float = 1.0
+    weibull_noise_schedule: str = "constant"
+    min_weibull_noise_scale: float = 0.0
     pareto_noise_scale: float = 0.0
     pareto_alpha: float = 1.0
     pareto_noise_schedule: str = "constant"
@@ -3307,6 +3356,40 @@ class MDLMContinuousBatchingManager:
                 if current_student_t_noise_scale > 0.0:
                     student_t_dist = torch.distributions.studentT.StudentT(req.student_t_df)
                     noise = student_t_dist.sample(req_logits.shape).to(req_logits.device) * current_student_t_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.logistic_noise_scale > 0.0:
+                current_logistic_noise_scale = req.logistic_noise_scale
+                if req.logistic_noise_schedule == "linear":
+                    current_logistic_noise_scale = req.logistic_noise_scale * (1.0 - step_ratio)
+                elif req.logistic_noise_schedule == "cosine":
+                    current_logistic_noise_scale = req.logistic_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.logistic_noise_schedule == "exponential":
+                    current_logistic_noise_scale = req.logistic_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.logistic_noise_schedule == "cyclic":
+                    current_logistic_noise_scale = req.logistic_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_logistic_noise_scale = max(current_logistic_noise_scale, req.min_logistic_noise_scale)
+
+                if current_logistic_noise_scale > 0.0:
+                    u = torch.rand(req_logits.shape, device=req_logits.device)
+                    noise = current_logistic_noise_scale * torch.log(u / (1.0 - u))
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.weibull_noise_scale > 0.0:
+                current_weibull_noise_scale = req.weibull_noise_scale
+                if req.weibull_noise_schedule == "linear":
+                    current_weibull_noise_scale = req.weibull_noise_scale * (1.0 - step_ratio)
+                elif req.weibull_noise_schedule == "cosine":
+                    current_weibull_noise_scale = req.weibull_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.weibull_noise_schedule == "exponential":
+                    current_weibull_noise_scale = req.weibull_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.weibull_noise_schedule == "cyclic":
+                    current_weibull_noise_scale = req.weibull_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_weibull_noise_scale = max(current_weibull_noise_scale, req.min_weibull_noise_scale)
+
+                if current_weibull_noise_scale > 0.0:
+                    weibull_dist = torch.distributions.weibull.Weibull(scale=1.0, concentration=req.weibull_noise_shape)
+                    noise = weibull_dist.sample(req_logits.shape).to(req_logits.device) * current_weibull_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
             if req.pareto_noise_scale > 0.0:
