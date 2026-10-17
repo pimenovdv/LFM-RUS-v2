@@ -4,14 +4,16 @@
 
 ## [x] Завершенные этапы (Шаги 1-106)
 **Сжатое описание:**
-Реализована полнофункциональная интеграция MDLM. Включает базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, MoE, RAG, Continuous Time Diffusion, дистилляцию консистентности, Latent Masked Diffusion, Discrete Flow Matching, Contrastive Decoding, Mirostat, DRY Sampling, Min-K%, XTC, Quantile, Thresholding, вероятностные фильтры для Continuous Batching, Logit Softcapping, Stochastic Unmasking, Uniform/Laplacian/Cauchy Noise, Penalties, SmoothK, Positional Temperature, Confidence-Aware Temperature (CAT), Token Drop Sampling (TDS), Rank-Based Sampling, Epsilon-Greedy Sampling, Student-T Noise Injection и Pareto Noise Injection Sampling.
+Реализована полнофункциональная интеграция MDLM. Включает базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, MoE, RAG, Continuous Time Diffusion, дистилляцию консистентности, Latent Masked Diffusion, Discrete Flow Matching, Contrastive Decoding, Mirostat, DRY Sampling, Min-K%, XTC, Quantile, Thresholding, вероятностные фильтры для Continuous Batching, Logit Softcapping, Stochastic Unmasking, Uniform/Laplacian/Cauchy Noise, Penalties, SmoothK, Positional Temperature, Confidence-Aware Temperature (CAT), Token Drop Sampling (TDS), Rank-Based Sampling, Epsilon-Greedy Sampling, Student-T Noise Injection и Pareto Noise Injection Sampling, and Gaussian/Gumbel Logit Noising.
 
-## [x] Шаг 107: Внедрение Logit Noising Sampling (Gaussian и Gumbel)
-**Цель:** Добавить новые методы вероятностного зашумления логитов на основе Гауссова распределения (Gaussian Logit Noising) и распределения Гамбеля (Gumbel Logit Noising) для управления вариативностью генерации.
+
+## [x] Шаг 108: Внедрение Logistic и Weibull Noise Injection Sampling
+**Цель:** Добавить инъекцию шума из Логистического распределения и распределения Вейбулла в confidence scores для маскированной диффузии.
 **Детали:**
-- **Gaussian Logit Noising:** Внедрение шума из нормального (Гауссова) распределения напрямую в логиты.
-  *Параметры:* `gaussian_logit_noise_scale` (float), `gaussian_logit_noise_schedule` (str), `min_gaussian_logit_noise_scale` (float).
-- **Gumbel Logit Noising:** Добавление Гамбелевского шума к логитам независимо от основного `gumbel_temperature`, для более гибкого сэмплирования.
-  *Параметры:* `gumbel_logit_noise_scale` (float), `gumbel_logit_noise_schedule` (str), `min_gumbel_logit_noise_scale` (float).
-- Интеграция динамических расписаний в методы `generate` и `step` (continuous batching).
-- Покрытие кода тестами.
+- **Logistic Noise Injection:** Добавление шума из логистического распределения.
+  *Параметры:* `logistic_noise_scale` (float), `logistic_noise_schedule` (str), `min_logistic_noise_scale` (float).
+- **Weibull Noise Injection:** Добавление шума из распределения Вейбулла.
+  *Параметры:* `weibull_noise_scale` (float), `weibull_noise_shape` (float), `weibull_noise_schedule` (str), `min_weibull_noise_scale` (float).
+- Поддержка динамических расписаний.
+- Интеграция в `generate` и continuous batching (`MDLMRequest` и `step`).
+- Покрытие тестами.
