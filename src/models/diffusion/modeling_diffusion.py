@@ -841,6 +841,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         pareto_alpha: float = 1.0,
         pareto_noise_schedule: str = "constant",
         min_pareto_noise_scale: float = 0.0,
+        rayleigh_noise_scale: float = 0.0,
+        rayleigh_noise_schedule: str = "constant",
+        min_rayleigh_noise_scale: float = 0.0,
+        log_normal_noise_scale: float = 0.0,
+        log_normal_noise_schedule: str = "constant",
+        min_log_normal_noise_scale: float = 0.0,
+        log_normal_noise_mean: float = 0.0,
         gaussian_logit_noise_scale: float = 0.0,
         gaussian_logit_noise_schedule: str = "constant",
         min_gaussian_logit_noise_scale: float = 0.0,
@@ -1972,6 +1979,45 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = pareto_dist.sample(logits.shape).to(logits.device) * current_pareto_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
+                if rayleigh_noise_scale > 0.0:
+                    if rayleigh_noise_schedule == "linear":
+                        current_rayleigh_noise_scale = rayleigh_noise_scale * (1.0 - step_ratio)
+                    elif rayleigh_noise_schedule == "cosine":
+                        current_rayleigh_noise_scale = rayleigh_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif rayleigh_noise_schedule == "exponential":
+                        current_rayleigh_noise_scale = rayleigh_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif rayleigh_noise_schedule == "cyclic":
+                        current_rayleigh_noise_scale = rayleigh_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_rayleigh_noise_scale = rayleigh_noise_scale
+                    current_rayleigh_noise_scale = max(current_rayleigh_noise_scale, min_rayleigh_noise_scale)
+                else:
+                    current_rayleigh_noise_scale = rayleigh_noise_scale
+
+                if current_rayleigh_noise_scale > 0.0:
+                    noise = torch.sqrt(-2 * torch.log(1 - torch.rand(logits.shape, device=logits.device))) * current_rayleigh_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
+                if log_normal_noise_scale > 0.0:
+                    if log_normal_noise_schedule == "linear":
+                        current_log_normal_noise_scale = log_normal_noise_scale * (1.0 - step_ratio)
+                    elif log_normal_noise_schedule == "cosine":
+                        current_log_normal_noise_scale = log_normal_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif log_normal_noise_schedule == "exponential":
+                        current_log_normal_noise_scale = log_normal_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif log_normal_noise_schedule == "cyclic":
+                        current_log_normal_noise_scale = log_normal_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_log_normal_noise_scale = log_normal_noise_scale
+                    current_log_normal_noise_scale = max(current_log_normal_noise_scale, min_log_normal_noise_scale)
+                else:
+                    current_log_normal_noise_scale = log_normal_noise_scale
+
+                if current_log_normal_noise_scale > 0.0:
+                    log_normal_dist = torch.distributions.log_normal.LogNormal(log_normal_noise_mean, 1.0)
+                    noise = log_normal_dist.sample(logits.shape).to(logits.device) * current_log_normal_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
                 current_top_n_tokens = top_n_tokens
                 if top_n_tokens > 0:
                     if top_n_tokens_schedule == "linear":
@@ -2844,6 +2890,13 @@ class MDLMRequest:
     pareto_alpha: float = 1.0
     pareto_noise_schedule: str = "constant"
     min_pareto_noise_scale: float = 0.0
+    rayleigh_noise_scale: float = 0.0
+    rayleigh_noise_schedule: str = "constant"
+    min_rayleigh_noise_scale: float = 0.0
+    log_normal_noise_scale: float = 0.0
+    log_normal_noise_schedule: str = "constant"
+    min_log_normal_noise_scale: float = 0.0
+    log_normal_noise_mean: float = 0.0
     gaussian_logit_noise_scale: float = 0.0
     gaussian_logit_noise_schedule: str = "constant"
     min_gaussian_logit_noise_scale: float = 0.0
@@ -3407,6 +3460,39 @@ class MDLMContinuousBatchingManager:
                 if current_pareto_noise_scale > 0.0:
                     pareto_dist = torch.distributions.pareto.Pareto(scale=1.0, alpha=req.pareto_alpha)
                     noise = pareto_dist.sample(req_logits.shape).to(req_logits.device) * current_pareto_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.rayleigh_noise_scale > 0.0:
+                current_rayleigh_noise_scale = req.rayleigh_noise_scale
+                if req.rayleigh_noise_schedule == "linear":
+                    current_rayleigh_noise_scale = req.rayleigh_noise_scale * (1.0 - step_ratio)
+                elif req.rayleigh_noise_schedule == "cosine":
+                    current_rayleigh_noise_scale = req.rayleigh_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.rayleigh_noise_schedule == "exponential":
+                    current_rayleigh_noise_scale = req.rayleigh_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.rayleigh_noise_schedule == "cyclic":
+                    current_rayleigh_noise_scale = req.rayleigh_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_rayleigh_noise_scale = max(current_rayleigh_noise_scale, req.min_rayleigh_noise_scale)
+
+                if current_rayleigh_noise_scale > 0.0:
+                    noise = torch.sqrt(-2 * torch.log(1 - torch.rand(req_logits.shape, device=req_logits.device))) * current_rayleigh_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.log_normal_noise_scale > 0.0:
+                current_log_normal_noise_scale = req.log_normal_noise_scale
+                if req.log_normal_noise_schedule == "linear":
+                    current_log_normal_noise_scale = req.log_normal_noise_scale * (1.0 - step_ratio)
+                elif req.log_normal_noise_schedule == "cosine":
+                    current_log_normal_noise_scale = req.log_normal_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.log_normal_noise_schedule == "exponential":
+                    current_log_normal_noise_scale = req.log_normal_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.log_normal_noise_schedule == "cyclic":
+                    current_log_normal_noise_scale = req.log_normal_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_log_normal_noise_scale = max(current_log_normal_noise_scale, req.min_log_normal_noise_scale)
+
+                if current_log_normal_noise_scale > 0.0:
+                    log_normal_dist = torch.distributions.log_normal.LogNormal(req.log_normal_noise_mean, 1.0)
+                    noise = log_normal_dist.sample(req_logits.shape).to(req_logits.device) * current_log_normal_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
             if req.prob_threshold_val > 0.0:
