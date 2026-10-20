@@ -851,6 +851,21 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         exponential_noise_scale: float = 0.0,
         exponential_noise_schedule: str = "constant",
         min_exponential_noise_scale: float = 0.0,
+        gamma_noise_scale: float = 0.0,
+        gamma_noise_schedule: str = "constant",
+        min_gamma_noise_scale: float = 0.0,
+        gamma_noise_concentration: float = 1.0,
+        gamma_noise_rate: float = 1.0,
+        beta_noise_scale: float = 0.0,
+        beta_noise_schedule: str = "constant",
+        min_beta_noise_scale: float = 0.0,
+        beta_noise_alpha: float = 1.0,
+        beta_noise_beta: float = 1.0,
+        von_mises_noise_scale: float = 0.0,
+        von_mises_noise_schedule: str = "constant",
+        min_von_mises_noise_scale: float = 0.0,
+        von_mises_noise_loc: float = 0.0,
+        von_mises_noise_concentration: float = 1.0,
         gaussian_logit_noise_scale: float = 0.0,
         gaussian_logit_noise_schedule: str = "constant",
         min_gaussian_logit_noise_scale: float = 0.0,
@@ -2041,6 +2056,66 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = exponential_dist.sample(logits.shape).to(logits.device) * current_exponential_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
+                if gamma_noise_scale > 0.0:
+                    if gamma_noise_schedule == "linear":
+                        current_gamma_noise_scale = gamma_noise_scale * (1.0 - step_ratio)
+                    elif gamma_noise_schedule == "cosine":
+                        current_gamma_noise_scale = gamma_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif gamma_noise_schedule == "exponential":
+                        current_gamma_noise_scale = gamma_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif gamma_noise_schedule == "cyclic":
+                        current_gamma_noise_scale = gamma_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_gamma_noise_scale = gamma_noise_scale
+                    current_gamma_noise_scale = max(current_gamma_noise_scale, min_gamma_noise_scale)
+                else:
+                    current_gamma_noise_scale = gamma_noise_scale
+
+                if current_gamma_noise_scale > 0.0:
+                    gamma_dist = torch.distributions.gamma.Gamma(gamma_noise_concentration, gamma_noise_rate)
+                    noise = gamma_dist.sample(logits.shape).to(logits.device) * current_gamma_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
+                if beta_noise_scale > 0.0:
+                    if beta_noise_schedule == "linear":
+                        current_beta_noise_scale = beta_noise_scale * (1.0 - step_ratio)
+                    elif beta_noise_schedule == "cosine":
+                        current_beta_noise_scale = beta_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif beta_noise_schedule == "exponential":
+                        current_beta_noise_scale = beta_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif beta_noise_schedule == "cyclic":
+                        current_beta_noise_scale = beta_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_beta_noise_scale = beta_noise_scale
+                    current_beta_noise_scale = max(current_beta_noise_scale, min_beta_noise_scale)
+                else:
+                    current_beta_noise_scale = beta_noise_scale
+
+                if current_beta_noise_scale > 0.0:
+                    beta_dist = torch.distributions.beta.Beta(beta_noise_alpha, beta_noise_beta)
+                    noise = beta_dist.sample(logits.shape).to(logits.device) * current_beta_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
+                if von_mises_noise_scale > 0.0:
+                    if von_mises_noise_schedule == "linear":
+                        current_von_mises_noise_scale = von_mises_noise_scale * (1.0 - step_ratio)
+                    elif von_mises_noise_schedule == "cosine":
+                        current_von_mises_noise_scale = von_mises_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif von_mises_noise_schedule == "exponential":
+                        current_von_mises_noise_scale = von_mises_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif von_mises_noise_schedule == "cyclic":
+                        current_von_mises_noise_scale = von_mises_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_von_mises_noise_scale = von_mises_noise_scale
+                    current_von_mises_noise_scale = max(current_von_mises_noise_scale, min_von_mises_noise_scale)
+                else:
+                    current_von_mises_noise_scale = von_mises_noise_scale
+
+                if current_von_mises_noise_scale > 0.0:
+                    von_mises_dist = torch.distributions.von_mises.VonMises(von_mises_noise_loc, von_mises_noise_concentration)
+                    noise = von_mises_dist.sample(logits.shape).to(logits.device) * current_von_mises_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
                 current_top_n_tokens = top_n_tokens
                 if top_n_tokens > 0:
                     if top_n_tokens_schedule == "linear":
@@ -2923,6 +2998,21 @@ class MDLMRequest:
     exponential_noise_scale: float = 0.0
     exponential_noise_schedule: str = "constant"
     min_exponential_noise_scale: float = 0.0
+    gamma_noise_scale: float = 0.0
+    gamma_noise_schedule: str = "constant"
+    min_gamma_noise_scale: float = 0.0
+    gamma_noise_concentration: float = 1.0
+    gamma_noise_rate: float = 1.0
+    beta_noise_scale: float = 0.0
+    beta_noise_schedule: str = "constant"
+    min_beta_noise_scale: float = 0.0
+    beta_noise_alpha: float = 1.0
+    beta_noise_beta: float = 1.0
+    von_mises_noise_scale: float = 0.0
+    von_mises_noise_schedule: str = "constant"
+    min_von_mises_noise_scale: float = 0.0
+    von_mises_noise_loc: float = 0.0
+    von_mises_noise_concentration: float = 1.0
     gaussian_logit_noise_scale: float = 0.0
     gaussian_logit_noise_schedule: str = "constant"
     min_gaussian_logit_noise_scale: float = 0.0
@@ -3536,6 +3626,57 @@ class MDLMContinuousBatchingManager:
                 if current_exponential_noise_scale > 0.0:
                     exponential_dist = torch.distributions.exponential.Exponential(rate=1.0)
                     noise = exponential_dist.sample(req_logits.shape).to(req_logits.device) * current_exponential_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.gamma_noise_scale > 0.0:
+                current_gamma_noise_scale = req.gamma_noise_scale
+                if req.gamma_noise_schedule == "linear":
+                    current_gamma_noise_scale = req.gamma_noise_scale * (1.0 - step_ratio)
+                elif req.gamma_noise_schedule == "cosine":
+                    current_gamma_noise_scale = req.gamma_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.gamma_noise_schedule == "exponential":
+                    current_gamma_noise_scale = req.gamma_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.gamma_noise_schedule == "cyclic":
+                    current_gamma_noise_scale = req.gamma_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_gamma_noise_scale = max(current_gamma_noise_scale, req.min_gamma_noise_scale)
+
+                if current_gamma_noise_scale > 0.0:
+                    gamma_dist = torch.distributions.gamma.Gamma(req.gamma_noise_concentration, req.gamma_noise_rate)
+                    noise = gamma_dist.sample(req_logits.shape).to(req_logits.device) * current_gamma_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.beta_noise_scale > 0.0:
+                current_beta_noise_scale = req.beta_noise_scale
+                if req.beta_noise_schedule == "linear":
+                    current_beta_noise_scale = req.beta_noise_scale * (1.0 - step_ratio)
+                elif req.beta_noise_schedule == "cosine":
+                    current_beta_noise_scale = req.beta_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.beta_noise_schedule == "exponential":
+                    current_beta_noise_scale = req.beta_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.beta_noise_schedule == "cyclic":
+                    current_beta_noise_scale = req.beta_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_beta_noise_scale = max(current_beta_noise_scale, req.min_beta_noise_scale)
+
+                if current_beta_noise_scale > 0.0:
+                    beta_dist = torch.distributions.beta.Beta(req.beta_noise_alpha, req.beta_noise_beta)
+                    noise = beta_dist.sample(req_logits.shape).to(req_logits.device) * current_beta_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.von_mises_noise_scale > 0.0:
+                current_von_mises_noise_scale = req.von_mises_noise_scale
+                if req.von_mises_noise_schedule == "linear":
+                    current_von_mises_noise_scale = req.von_mises_noise_scale * (1.0 - step_ratio)
+                elif req.von_mises_noise_schedule == "cosine":
+                    current_von_mises_noise_scale = req.von_mises_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.von_mises_noise_schedule == "exponential":
+                    current_von_mises_noise_scale = req.von_mises_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.von_mises_noise_schedule == "cyclic":
+                    current_von_mises_noise_scale = req.von_mises_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_von_mises_noise_scale = max(current_von_mises_noise_scale, req.min_von_mises_noise_scale)
+
+                if current_von_mises_noise_scale > 0.0:
+                    von_mises_dist = torch.distributions.von_mises.VonMises(req.von_mises_noise_loc, req.von_mises_noise_concentration)
+                    noise = von_mises_dist.sample(req_logits.shape).to(req_logits.device) * current_von_mises_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
             if req.prob_threshold_val > 0.0:
