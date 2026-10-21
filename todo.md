@@ -6,7 +6,7 @@
 **Сжатое описание:**
 Реализована полнофункциональная интеграция MDLM. Включает базовый сэмплинг, динамические расписания, Classifier-Free Guidance, Watermarking, Classifier-Guided Sampling, Continuous Batching, Dynamic Batching, Beam Search, Speculative Decoding, LoRA, оптимизацию памяти, RLAIF, MoE, RAG, Continuous Time Diffusion, дистилляцию консистентности, Latent Masked Diffusion, Discrete Flow Matching, Contrastive Decoding, Mirostat, DRY Sampling, Min-K%, XTC, Quantile, Thresholding, вероятностные фильтры для Continuous Batching, Logit Softcapping, Stochastic Unmasking, Uniform/Laplacian/Cauchy/Student-T/Pareto/Logistic/Weibull/Rayleigh/Log-Normal/Exponential/Gamma/Beta/Von Mises Noise, Penalties, SmoothK, Positional Temperature, CAT, TDS, Rank-Based Sampling, Epsilon-Greedy, и Logit Noising.
 
-## [ ] Шаг 114: Внедрение Dirichlet Noise Injection Sampling
+## [x] Шаг 114: Внедрение Dirichlet Noise Injection Sampling
 **Цель:** Добавить инъекцию шума из распределения Дирихле в confidence scores (logits) для маскированной диффузии.
 **Детали:**
 - Добавить параметры: `dirichlet_noise_scale` (float), `dirichlet_noise_schedule` (str), `min_dirichlet_noise_scale` (float), `dirichlet_noise_alpha` (float или list/tensor).
