@@ -870,6 +870,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         dirichlet_noise_schedule: str = "constant",
         min_dirichlet_noise_scale: float = 0.0,
         dirichlet_noise_alpha: float = 1.0,
+        poisson_noise_scale: float = 0.0,
+        poisson_noise_schedule: str = "constant",
+        min_poisson_noise_scale: float = 0.0,
+        poisson_noise_rate: float = 1.0,
         gaussian_logit_noise_scale: float = 0.0,
         gaussian_logit_noise_schedule: str = "constant",
         min_gaussian_logit_noise_scale: float = 0.0,
@@ -2141,6 +2145,26 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = dirichlet_dist.sample(logits.shape[:-1]).to(logits.device) * current_dirichlet_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
+                if poisson_noise_scale > 0.0:
+                    if poisson_noise_schedule == "linear":
+                        current_poisson_noise_scale = poisson_noise_scale * (1.0 - step_ratio)
+                    elif poisson_noise_schedule == "cosine":
+                        current_poisson_noise_scale = poisson_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif poisson_noise_schedule == "exponential":
+                        current_poisson_noise_scale = poisson_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif poisson_noise_schedule == "cyclic":
+                        current_poisson_noise_scale = poisson_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_poisson_noise_scale = poisson_noise_scale
+                    current_poisson_noise_scale = max(current_poisson_noise_scale, min_poisson_noise_scale)
+                else:
+                    current_poisson_noise_scale = poisson_noise_scale
+
+                if current_poisson_noise_scale > 0.0:
+                    poisson_dist = torch.distributions.poisson.Poisson(torch.tensor(poisson_noise_rate, device=logits.device))
+                    noise = poisson_dist.sample(logits.shape).to(logits.device) * current_poisson_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
                 current_top_n_tokens = top_n_tokens
                 if top_n_tokens > 0:
                     if top_n_tokens_schedule == "linear":
@@ -3042,6 +3066,10 @@ class MDLMRequest:
     dirichlet_noise_schedule: str = "constant"
     min_dirichlet_noise_scale: float = 0.0
     dirichlet_noise_alpha: float = 1.0
+    poisson_noise_scale: float = 0.0
+    poisson_noise_schedule: str = "constant"
+    min_poisson_noise_scale: float = 0.0
+    poisson_noise_rate: float = 1.0
     gaussian_logit_noise_scale: float = 0.0
     gaussian_logit_noise_schedule: str = "constant"
     min_gaussian_logit_noise_scale: float = 0.0
@@ -3724,6 +3752,23 @@ class MDLMContinuousBatchingManager:
                     alpha_tensor = torch.full((req_logits.shape[-1],), req.dirichlet_noise_alpha, device=req_logits.device)
                     dirichlet_dist = torch.distributions.dirichlet.Dirichlet(alpha_tensor)
                     noise = dirichlet_dist.sample(req_logits.shape[:-1]).to(req_logits.device) * current_dirichlet_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            if req.poisson_noise_scale > 0.0:
+                current_poisson_noise_scale = req.poisson_noise_scale
+                if req.poisson_noise_schedule == "linear":
+                    current_poisson_noise_scale = req.poisson_noise_scale * (1.0 - step_ratio)
+                elif req.poisson_noise_schedule == "cosine":
+                    current_poisson_noise_scale = req.poisson_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.poisson_noise_schedule == "exponential":
+                    current_poisson_noise_scale = req.poisson_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.poisson_noise_schedule == "cyclic":
+                    current_poisson_noise_scale = req.poisson_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_poisson_noise_scale = max(current_poisson_noise_scale, req.min_poisson_noise_scale)
+
+                if current_poisson_noise_scale > 0.0:
+                    poisson_dist = torch.distributions.poisson.Poisson(torch.tensor(req.poisson_noise_rate, device=req_logits.device))
+                    noise = poisson_dist.sample(req_logits.shape).to(req_logits.device) * current_poisson_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
             if req.prob_threshold_val > 0.0:
