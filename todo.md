@@ -13,7 +13,7 @@
 - Интегрировать в методы `generate` и непрерывный батчинг.
 - Создать тесты.
 
-## [ ] Шаг 115: Внедрение Poisson Noise Injection Sampling
+## [x] Шаг 115: Внедрение Poisson Noise Injection Sampling
 **Цель:** Добавить инъекцию пуассоновского шума в confidence scores (logits) для маскированной диффузии.
 **Детали:**
 - Добавить параметры `poisson_noise_scale`, `poisson_noise_schedule`, `min_poisson_noise_scale`, `poisson_noise_rate`.
