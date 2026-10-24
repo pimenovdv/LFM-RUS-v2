@@ -890,6 +890,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         dynamic_temperature_entropy: float = 0.0,
         dynamic_temperature_entropy_schedule: str = "constant",
         min_dynamic_temperature_entropy: float = 0.0,
+        tsallis_temperature_entropy: float = 0.0,
+        tsallis_temperature_entropy_schedule: str = "constant",
+        min_tsallis_temperature_entropy: float = 0.0,
+        tsallis_q: float = 1.0,
         encoder_repetition_penalty: float = 1.0,
         encoder_frequency_penalty: float = 0.0,
         encoder_presence_penalty: float = 0.0,
@@ -2472,7 +2476,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     logits = logits_processor(x, logits)
 
                 current_temperature = temperature
-                if temperature > 0 or dynamic_temperature_entropy > 0 or positional_temperature > 0:
+                if temperature > 0 or dynamic_temperature_entropy > 0 or tsallis_temperature_entropy > 0 or positional_temperature > 0:
                     if positional_temperature > 0.0:
                         current_positional_temperature = positional_temperature
                         if positional_temperature_schedule == "linear":
@@ -2547,6 +2551,27 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         probs = F.softmax(logits, dim=-1)
                         entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
                         current_temperature = current_temperature + current_dynamic_temperature_entropy * entropy
+
+                    if tsallis_temperature_entropy > 0.0:
+                        current_tsallis_temperature_entropy = tsallis_temperature_entropy
+                        if tsallis_temperature_entropy_schedule == "linear":
+                            current_tsallis_temperature_entropy = tsallis_temperature_entropy * (1.0 - step_ratio)
+                        elif tsallis_temperature_entropy_schedule == "cosine":
+                            current_tsallis_temperature_entropy = tsallis_temperature_entropy * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                        elif tsallis_temperature_entropy_schedule == "exponential":
+                            current_tsallis_temperature_entropy = tsallis_temperature_entropy * math.exp(-3.0 * step_ratio)
+                        elif tsallis_temperature_entropy_schedule == "cyclic":
+                            current_tsallis_temperature_entropy = tsallis_temperature_entropy * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                        current_tsallis_temperature_entropy = max(current_tsallis_temperature_entropy, min_tsallis_temperature_entropy)
+
+                        probs = F.softmax(logits, dim=-1)
+                        if tsallis_q == 1.0:
+                            tsallis_entropy_val = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                        else:
+                            tsallis_entropy_val = (1.0 - torch.sum(probs ** tsallis_q, dim=-1, keepdim=True)) / (tsallis_q - 1.0)
+
+                        current_temperature = current_temperature + current_tsallis_temperature_entropy * tsallis_entropy_val
 
                     # Handle case where current_temperature becomes a tensor (from entropy)
                     if isinstance(current_temperature, torch.Tensor):
@@ -2954,6 +2979,10 @@ class MDLMRequest:
     dynamic_temperature_entropy: float = 0.0
     dynamic_temperature_entropy_schedule: str = "constant"
     min_dynamic_temperature_entropy: float = 0.0
+    tsallis_temperature_entropy: float = 0.0
+    tsallis_temperature_entropy_schedule: str = "constant"
+    min_tsallis_temperature_entropy: float = 0.0
+    tsallis_q: float = 1.0
     gumbel_temperature: Optional[float] = None
     gumbel_temperature_schedule: str = "constant"
     min_gumbel_temperature: float = 0.0
@@ -4190,7 +4219,7 @@ class MDLMContinuousBatchingManager:
                 current_epsilon_greedy = max(current_epsilon_greedy, req.min_epsilon_greedy_prob)
 
             current_temperature = req.temperature
-            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.positional_temperature > 0:
+            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.tsallis_temperature_entropy > 0 or req.positional_temperature > 0:
                 if req.positional_temperature > 0.0:
                     current_positional_temperature = req.positional_temperature
                     if req.positional_temperature_schedule == "linear":
@@ -4258,10 +4287,31 @@ class MDLMContinuousBatchingManager:
                     entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
                     current_temperature = current_temperature + current_dynamic_temperature_entropy * entropy
 
-                    if isinstance(current_temperature, torch.Tensor):
-                        current_temperature = torch.clamp(current_temperature, min=1e-5)
+                if req.tsallis_temperature_entropy > 0.0:
+                    current_tsallis_temperature_entropy = req.tsallis_temperature_entropy
+                    if req.tsallis_temperature_entropy_schedule == "linear":
+                        current_tsallis_temperature_entropy = req.tsallis_temperature_entropy * (1.0 - step_ratio)
+                    elif req.tsallis_temperature_entropy_schedule == "cosine":
+                        current_tsallis_temperature_entropy = req.tsallis_temperature_entropy * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif req.tsallis_temperature_entropy_schedule == "exponential":
+                        current_tsallis_temperature_entropy = req.tsallis_temperature_entropy * math.exp(-3.0 * step_ratio)
+                    elif req.tsallis_temperature_entropy_schedule == "cyclic":
+                        current_tsallis_temperature_entropy = req.tsallis_temperature_entropy * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    current_tsallis_temperature_entropy = max(current_tsallis_temperature_entropy, req.min_tsallis_temperature_entropy)
+
+                    probs = F.softmax(req_logits, dim=-1)
+                    if req.tsallis_q == 1.0:
+                        tsallis_entropy_val = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
                     else:
-                        current_temperature = max(current_temperature, 1e-5)
+                        tsallis_entropy_val = (1.0 - torch.sum(probs ** req.tsallis_q, dim=-1, keepdim=True)) / (req.tsallis_q - 1.0)
+
+                    current_temperature = current_temperature + current_tsallis_temperature_entropy * tsallis_entropy_val
+
+                if isinstance(current_temperature, torch.Tensor):
+                    current_temperature = torch.clamp(current_temperature, min=1e-5)
+                else:
+                    current_temperature = max(current_temperature, 1e-5)
 
             if current_epsilon_greedy > 0.0 and torch.rand(1).item() < current_epsilon_greedy:
                 valid_mask = req_logits != -float('inf')
