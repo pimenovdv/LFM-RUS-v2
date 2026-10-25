@@ -2818,6 +2818,19 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                 target_tokens = max(1, int(curr_masks * confidence_score))
                                 linear_tokens = max(1, curr_masks // remaining_steps)
                                 num_transfer_tokens[b_idx, i] = int((target_tokens + linear_tokens) / 2)
+                    elif unmasking_schedule == "adaptive_masking":
+                        for b_idx in range(x.shape[0]):
+                            curr_masks = mask_index[b_idx].sum().item()
+                            remaining_steps = steps_per_block - i
+                            if remaining_steps <= 1:
+                                num_transfer_tokens[b_idx, i] = curr_masks
+                            elif curr_masks == 0:
+                                num_transfer_tokens[b_idx, i] = 0
+                            else:
+                                mean_confidence = confidence[b_idx][mask_index[b_idx]].mean().item()
+                                target_tokens = max(1, int(curr_masks * mean_confidence))
+                                linear_tokens = max(1, curr_masks // remaining_steps)
+                                num_transfer_tokens[b_idx, i] = int((target_tokens + linear_tokens) / 2)
 
                     if stochastic_unmasking:
                         confidence = torch.where(confidence == -float('inf'), confidence, confidence + torch.rand_like(confidence))
@@ -4353,6 +4366,19 @@ class MDLMContinuousBatchingManager:
                     norm_ent = mean_ent / max_ent
                     confidence_score = 1.0 - norm_ent
                     target_tokens = max(1, int(curr_masks * confidence_score))
+                    linear_tokens = max(1, curr_masks // remaining_steps)
+                    req.transfer_tokens[0, req.current_step] = int((target_tokens + linear_tokens) / 2)
+                M = req.transfer_tokens[0, req.current_step].item()
+            elif req.unmasking_schedule == "adaptive_masking":
+                curr_masks = req.mask_index[0].sum().item()
+                remaining_steps = req.total_steps - req.current_step
+                if remaining_steps <= 1:
+                    req.transfer_tokens[0, req.current_step] = curr_masks
+                elif curr_masks == 0:
+                    req.transfer_tokens[0, req.current_step] = 0
+                else:
+                    mean_confidence = confidence[0][req.mask_index[0]].mean().item()
+                    target_tokens = max(1, int(curr_masks * mean_confidence))
                     linear_tokens = max(1, curr_masks // remaining_steps)
                     req.transfer_tokens[0, req.current_step] = int((target_tokens + linear_tokens) / 2)
                 M = req.transfer_tokens[0, req.current_step].item()
