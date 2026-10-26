@@ -3016,6 +3016,13 @@ class MDLMRequest:
     frequency_penalty: float = 0.0
     frequency_penalty_schedule: str = "constant"
     min_frequency_penalty: float = 0.0
+
+    guidance_rescale: float = 0.0
+    guidance_rescale_schedule: str = "constant"
+    min_guidance_rescale: float = 0.0
+    adaptive_token_temperature: float = 0.0
+    adaptive_token_temperature_schedule: str = "constant"
+    min_adaptive_token_temperature: float = 0.0
     presence_penalty: float = 0.0
     presence_penalty_schedule: str = "constant"
     min_presence_penalty: float = 0.0
@@ -3269,6 +3276,7 @@ class MDLMContinuousBatchingManager:
         for i, req in enumerate(self.active_requests):
             req_len = req.x.size(1)
             req_logits = logits[i:i+1, :req_len, :]
+            original_req_logits = req_logits.clone()
 
             step_ratio = req.current_step / max(1, req.total_steps - 1) if req.total_steps > 1 else 0.0
 
@@ -4231,8 +4239,31 @@ class MDLMContinuousBatchingManager:
                     current_epsilon_greedy = req.epsilon_greedy_prob * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                 current_epsilon_greedy = max(current_epsilon_greedy, req.min_epsilon_greedy_prob)
 
+            if req.guidance_rescale > 0.0:
+                current_guidance_rescale = req.guidance_rescale
+                if req.guidance_rescale_schedule == "linear":
+                    current_guidance_rescale = req.guidance_rescale * (1.0 - step_ratio)
+                elif req.guidance_rescale_schedule == "cosine":
+                    current_guidance_rescale = req.guidance_rescale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.guidance_rescale_schedule == "exponential":
+                    current_guidance_rescale = req.guidance_rescale * math.exp(-3.0 * step_ratio)
+                elif req.guidance_rescale_schedule == "cyclic":
+                    current_guidance_rescale = req.guidance_rescale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_guidance_rescale = max(current_guidance_rescale, req.min_guidance_rescale)
+
+                if current_guidance_rescale > 0.0:
+                    std_original = original_req_logits.std(dim=-1, keepdim=True)
+                    std_current = req_logits.std(dim=-1, keepdim=True)
+                    std_current = torch.where(std_current > 0, std_current, torch.ones_like(std_current))
+
+                    req_logits_rescaled = req_logits * (std_original / std_current)
+                    req_logits = (
+                        req_logits_rescaled * current_guidance_rescale
+                        + req_logits * (1.0 - current_guidance_rescale)
+                    )
+
             current_temperature = req.temperature
-            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.tsallis_temperature_entropy > 0 or req.positional_temperature > 0:
+            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.tsallis_temperature_entropy > 0 or req.positional_temperature > 0 or req.adaptive_token_temperature > 0:
                 if req.positional_temperature > 0.0:
                     current_positional_temperature = req.positional_temperature
                     if req.positional_temperature_schedule == "linear":
@@ -4300,6 +4331,23 @@ class MDLMContinuousBatchingManager:
                     entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
                     current_temperature = current_temperature + current_dynamic_temperature_entropy * entropy
 
+                if req.adaptive_token_temperature > 0.0:
+                    current_adaptive_token_temperature = req.adaptive_token_temperature
+                    if req.adaptive_token_temperature_schedule == "linear":
+                        current_adaptive_token_temperature = req.adaptive_token_temperature * (1.0 - step_ratio)
+                    elif req.adaptive_token_temperature_schedule == "cosine":
+                        current_adaptive_token_temperature = req.adaptive_token_temperature * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif req.adaptive_token_temperature_schedule == "exponential":
+                        current_adaptive_token_temperature = req.adaptive_token_temperature * math.exp(-3.0 * step_ratio)
+                    elif req.adaptive_token_temperature_schedule == "cyclic":
+                        current_adaptive_token_temperature = req.adaptive_token_temperature * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_adaptive_token_temperature = max(current_adaptive_token_temperature, req.min_adaptive_token_temperature)
+
+                    if current_adaptive_token_temperature > 0.0:
+                        probs = torch.nn.functional.softmax(req_logits, dim=-1)
+                        entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                        current_temperature = current_temperature + current_adaptive_token_temperature * entropy
+
                 if req.tsallis_temperature_entropy > 0.0:
                     current_tsallis_temperature_entropy = req.tsallis_temperature_entropy
                     if req.tsallis_temperature_entropy_schedule == "linear":
@@ -4332,7 +4380,7 @@ class MDLMContinuousBatchingManager:
                 reshaped_probs = random_logits.view(-1, random_logits.size(-1))
                 reshaped_probs = reshaped_probs + 1e-9
                 x0 = torch.multinomial(reshaped_probs, num_samples=1).view(req_logits.size(0), req_logits.size(1))
-            elif (req.temperature > 0 or req.dynamic_temperature_entropy > 0) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
+            elif (req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.adaptive_token_temperature > 0) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
                 # Standard multinomial sampling if gumbel is explicitly disabled or we use fallback standard temp logic
                 req_logits = req_logits / current_temperature
                 probs = F.softmax(req_logits, dim=-1)

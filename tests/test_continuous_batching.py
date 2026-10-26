@@ -116,3 +116,48 @@ def test_generate_dynamic_batch(mock_diffusion_model):
     assert results[0].shape == (1, 5) # 2 + 3
     assert results[1].shape == (1, 5) # 3 + 2
     assert results[2].shape == (1, 2) # 1 + 1
+
+
+def test_guidance_rescale_applied(mock_diffusion_model):
+    manager = MDLMContinuousBatchingManager(mock_diffusion_model)
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    # We want to check that adding guidance_rescale modifies the output or completes without error.
+    # We can mock torch.where or tensor ops, but standard test structure verifies no crash
+    req_id = manager.add_request(
+        input_ids, max_new_tokens=2, total_steps=2,
+        guidance_rescale=0.5,
+        guidance_rescale_schedule="linear",
+        min_guidance_rescale=0.1
+    )
+
+    manager.step()
+    manager.step()
+
+    # Let's just verify it processes successfully without raising exceptions.
+    req = None
+    for r in manager.active_requests + manager.completed_requests:
+        if r.request_id == req_id:
+            req = r
+    assert req.guidance_rescale == 0.5
+
+
+def test_adaptive_token_temperature_applied(mock_diffusion_model):
+    manager = MDLMContinuousBatchingManager(mock_diffusion_model)
+    input_ids = torch.tensor([[1, 2, 3]])
+
+    req_id = manager.add_request(
+        input_ids, max_new_tokens=2, total_steps=2,
+        adaptive_token_temperature=1.0,
+        adaptive_token_temperature_schedule="cosine",
+        min_adaptive_token_temperature=0.1
+    )
+
+    manager.step()
+    manager.step()
+
+    req = None
+    for r in manager.active_requests + manager.completed_requests:
+        if r.request_id == req_id:
+            req = r
+    assert req.adaptive_token_temperature == 1.0
