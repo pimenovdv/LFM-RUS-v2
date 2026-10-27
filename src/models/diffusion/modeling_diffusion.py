@@ -748,6 +748,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         steps: Optional[int] = None,
         block_length: Optional[int] = None,
         temperature: float = 0.0,
+        length_temperature_scale: float = 0.0,
+        length_temperature_schedule: str = "constant",
+        min_length_temperature_scale: float = 0.0,
         temperature_schedule: str = "constant",
         min_temperature: float = 0.0,
         gumbel_temperature: Optional[float] = None,
@@ -759,6 +762,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         guidance_rescale_schedule: str = "constant",
         min_guidance_rescale: float = 0.0,
         top_k: int = 0,
+        entropy_top_k_scale: float = 0.0,
+        min_entropy_top_k: int = 1,
         top_k_schedule: str = "constant",
         min_top_k: int = 0,
         top_p: float = 1.0,
@@ -1366,6 +1371,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_top_k = int(top_k * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio)))
                     current_top_k = max(current_top_k, min_top_k)
 
+                    if entropy_top_k_scale > 0.0 and current_top_k > 0:
+                        probs = F.softmax(logits, dim=-1)
+                        entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                        current_top_k = torch.clamp((current_top_k * (1.0 + entropy * entropy_top_k_scale)).long(), min=min_entropy_top_k, max=logits.size(-1))
+
                 if (cfg_scale > 0.0 or tkg_scale > 0.0) and unconditional_input_ids is not None:
                     uncond_x = x.clone()
                     # Replace the conditional prefix with unconditional prefix
@@ -1414,8 +1424,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                         current_tkg_scale = max(current_tkg_scale, tkg_min_scale)
 
-                        top_k_val = min(max(current_top_k, 1), logits.size(-1))
-                        top_k_thresholds = torch.topk(logits, top_k_val, dim=-1)[0][..., -1, None]
+                        if isinstance(current_top_k, torch.Tensor):
+                            top_k_val = torch.clamp(current_top_k, min=1, max=logits.size(-1))
+                            sorted_logits, _ = torch.sort(logits, descending=True, dim=-1)
+                            top_k_thresholds = torch.gather(sorted_logits, -1, top_k_val - 1)
+                        else:
+                            top_k_val = min(max(current_top_k, 1), logits.size(-1))
+                            top_k_thresholds = torch.topk(logits, top_k_val, dim=-1)[0][..., -1, None]
                         mask = logits >= top_k_thresholds
                         guided_logits = guided_logits + current_tkg_scale * (logits - uncond_logits) * mask.float()
 
@@ -1639,7 +1654,13 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                     penalty = current_dry_multiplier * (dry_base ** (max_match - dry_allowed_length))
                                     logits[b, pos, tok] -= penalty
 
-                if current_top_k > 0:
+                if isinstance(current_top_k, torch.Tensor):
+                    top_k_val = torch.clamp(current_top_k, min=1, max=logits.size(-1))
+                    sorted_logits, _ = torch.sort(logits, descending=True, dim=-1)
+                    top_k_thresholds = torch.gather(sorted_logits, -1, top_k_val - 1)
+                    indices_to_remove = logits < top_k_thresholds
+                    logits = logits.masked_fill(indices_to_remove, -float("Inf"))
+                elif current_top_k > 0:
                     top_k_val = min(max(current_top_k, 1), logits.size(-1))
                     indices_to_remove = logits < torch.topk(logits, top_k_val, dim=-1)[0][..., -1, None]
                     logits = logits.masked_fill(indices_to_remove, -float("Inf"))
@@ -2476,7 +2497,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     logits = logits_processor(x, logits)
 
                 current_temperature = temperature
-                if temperature > 0 or dynamic_temperature_entropy > 0 or tsallis_temperature_entropy > 0 or positional_temperature > 0:
+                if temperature > 0 or dynamic_temperature_entropy > 0 or tsallis_temperature_entropy > 0 or positional_temperature > 0 or (length_temperature_scale > 0 and temperature > 0):
                     if positional_temperature > 0.0:
                         current_positional_temperature = positional_temperature
                         if positional_temperature_schedule == "linear":
@@ -2534,6 +2555,19 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_temperature = temperature * math.exp(-3.0 * step_ratio)
                     elif temperature_schedule == "cyclic":
                         current_temperature = temperature * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    if length_temperature_scale > 0.0 and temperature > 0.0:
+                        current_length_temperature_scale = length_temperature_scale
+                        if length_temperature_schedule == "linear":
+                            current_length_temperature_scale = length_temperature_scale * (1.0 - step_ratio)
+                        elif length_temperature_schedule == "cosine":
+                            current_length_temperature_scale = length_temperature_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                        elif length_temperature_schedule == "exponential":
+                            current_length_temperature_scale = length_temperature_scale * math.exp(-3.0 * step_ratio)
+                        elif length_temperature_schedule == "cyclic":
+                            current_length_temperature_scale = length_temperature_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                        current_length_temperature_scale = max(current_length_temperature_scale, min_length_temperature_scale)
+                        current_temperature = current_temperature * (1.0 + current_length_temperature_scale * step_ratio)
 
                     if dynamic_temperature_entropy > 0.0:
                         current_dynamic_temperature_entropy = dynamic_temperature_entropy
@@ -2989,6 +3023,9 @@ class MDLMRequest:
     total_steps: int
     unmasking_schedule: str = "linear"
     temperature: float = 0.0
+    length_temperature_scale: float = 0.0
+    length_temperature_schedule: str = "constant"
+    min_length_temperature_scale: float = 0.0
     dynamic_temperature_entropy: float = 0.0
     dynamic_temperature_entropy_schedule: str = "constant"
     min_dynamic_temperature_entropy: float = 0.0
@@ -3035,6 +3072,8 @@ class MDLMRequest:
     gaussian_noise_schedule: str = "constant"
     min_gaussian_noise_std: float = 0.0
     top_k: int = 0
+    entropy_top_k_scale: float = 0.0
+    min_entropy_top_k: int = 1
     top_k_schedule: str = "constant"
     min_top_k: int = 0
     top_p: float = 1.0
@@ -3417,7 +3456,18 @@ class MDLMContinuousBatchingManager:
                     current_top_k = int(req.top_k * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio)))
                 current_top_k = max(current_top_k, req.min_top_k)
 
-            if current_top_k > 0:
+                if req.entropy_top_k_scale > 0.0 and current_top_k > 0:
+                    probs = F.softmax(req_logits, dim=-1)
+                    entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                    current_top_k = torch.clamp((current_top_k * (1.0 + entropy * req.entropy_top_k_scale)).long(), min=req.min_entropy_top_k, max=req_logits.size(-1))
+
+            if isinstance(current_top_k, torch.Tensor):
+                top_k_val = torch.clamp(current_top_k, min=1, max=req_logits.size(-1))
+                sorted_logits, _ = torch.sort(req_logits, descending=True, dim=-1)
+                top_k_thresholds = torch.gather(sorted_logits, -1, top_k_val - 1)
+                indices_to_remove = req_logits < top_k_thresholds
+                req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
+            elif current_top_k > 0:
                 top_k_vals, _ = torch.topk(req_logits, min(current_top_k, req_logits.size(-1)))
                 indices_to_remove = req_logits < top_k_vals[..., -1, None]
                 req_logits = req_logits.masked_fill(indices_to_remove, -float("Inf"))
@@ -4263,7 +4313,7 @@ class MDLMContinuousBatchingManager:
                     )
 
             current_temperature = req.temperature
-            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.tsallis_temperature_entropy > 0 or req.positional_temperature > 0 or req.adaptive_token_temperature > 0:
+            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.tsallis_temperature_entropy > 0 or req.positional_temperature > 0 or req.adaptive_token_temperature > 0 or (req.length_temperature_scale > 0 and req.temperature > 0):
                 if req.positional_temperature > 0.0:
                     current_positional_temperature = req.positional_temperature
                     if req.positional_temperature_schedule == "linear":
@@ -4313,6 +4363,20 @@ class MDLMContinuousBatchingManager:
                     flatten_mask = max_probs > req.cat_max_prob
                     if current_cat_flatten != 1.0:
                         req_logits = torch.where(flatten_mask, req_logits * current_cat_flatten, req_logits)
+
+                if req.length_temperature_scale > 0.0 and req.temperature > 0.0:
+                    current_length_temperature_scale = req.length_temperature_scale
+                    if req.length_temperature_schedule == "linear":
+                        current_length_temperature_scale = req.length_temperature_scale * (1.0 - step_ratio)
+                    elif req.length_temperature_schedule == "cosine":
+                        current_length_temperature_scale = req.length_temperature_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif req.length_temperature_schedule == "exponential":
+                        current_length_temperature_scale = req.length_temperature_scale * math.exp(-3.0 * step_ratio)
+                    elif req.length_temperature_schedule == "cyclic":
+                        current_length_temperature_scale = req.length_temperature_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    current_length_temperature_scale = max(current_length_temperature_scale, req.min_length_temperature_scale)
+                    current_temperature = current_temperature * (1.0 + current_length_temperature_scale * step_ratio)
 
                 if req.dynamic_temperature_entropy > 0.0:
                     current_dynamic_temperature_entropy = req.dynamic_temperature_entropy
@@ -4380,7 +4444,7 @@ class MDLMContinuousBatchingManager:
                 reshaped_probs = random_logits.view(-1, random_logits.size(-1))
                 reshaped_probs = reshaped_probs + 1e-9
                 x0 = torch.multinomial(reshaped_probs, num_samples=1).view(req_logits.size(0), req_logits.size(1))
-            elif (req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.adaptive_token_temperature > 0) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
+            elif (req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.adaptive_token_temperature > 0 or (req.length_temperature_scale > 0 and req.temperature > 0)) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
                 # Standard multinomial sampling if gumbel is explicitly disabled or we use fallback standard temp logic
                 req_logits = req_logits / current_temperature
                 probs = F.softmax(req_logits, dim=-1)
