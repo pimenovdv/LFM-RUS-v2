@@ -758,6 +758,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         min_gumbel_temperature: float = 0.0,
         cfg_scale: float = 0.0,
         cfg_schedule: str = "constant",
+        length_cfg_scale: float = 0.0,
+        length_cfg_schedule: str = "constant",
+        min_length_cfg_scale: float = 0.0,
         guidance_rescale: float = 0.0,
         guidance_rescale_schedule: str = "constant",
         min_guidance_rescale: float = 0.0,
@@ -1407,6 +1410,19 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                             current_cfg_scale = cfg_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                         else:
                             current_cfg_scale = cfg_scale
+
+                        if length_cfg_scale > 0.0:
+                            current_length_cfg_scale = length_cfg_scale
+                            if length_cfg_schedule == "linear":
+                                current_length_cfg_scale = length_cfg_scale * (1.0 - step_ratio)
+                            elif length_cfg_schedule == "cosine":
+                                current_length_cfg_scale = length_cfg_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                            elif length_cfg_schedule == "exponential":
+                                current_length_cfg_scale = length_cfg_scale * math.exp(-3.0 * step_ratio)
+                            elif length_cfg_schedule == "cyclic":
+                                current_length_cfg_scale = length_cfg_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                            current_length_cfg_scale = max(current_length_cfg_scale, min_length_cfg_scale)
+                            current_cfg_scale = current_cfg_scale * (1.0 + current_length_cfg_scale * step_ratio)
 
                         guided_logits = uncond_logits + current_cfg_scale * (logits - uncond_logits)
 
@@ -2825,6 +2841,15 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         entropy = -torch.sum(p * torch.log(p + 1e-9), dim=-1)
                         # Lower entropy means higher confidence
                         x0_p = -entropy
+                    elif remasking == 'info_gain':
+                        p_cond = F.softmax(logits.to(torch.float64), dim=-1)
+                        if 'uncond_logits' in locals():
+                            p_uncond = F.softmax(uncond_logits.to(torch.float64), dim=-1)
+                        else:
+                            p_uncond = torch.ones_like(p_cond) / p_cond.size(-1)
+                        info_gain = torch.sum(p_cond * torch.log((p_cond + 1e-9) / (p_uncond + 1e-9)), dim=-1)
+                        # Higher info gain means higher confidence in the choice
+                        x0_p = info_gain
                     elif remasking == 'random':
                         x0_p = torch.rand((x0.shape[0], x0.shape[1]), device=x0.device)
                     else:
@@ -3036,6 +3061,12 @@ class MDLMRequest:
     gumbel_temperature: Optional[float] = None
     gumbel_temperature_schedule: str = "constant"
     min_gumbel_temperature: float = 0.0
+    length_cfg_scale: float = 0.0
+    length_cfg_schedule: str = "constant"
+    min_length_cfg_scale: float = 0.0
+    cfg_scale: float = 0.0
+    cfg_schedule: str = "constant"
+
     stochastic_unmasking: bool = False
     request_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     current_step: int = 0
