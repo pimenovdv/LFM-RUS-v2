@@ -988,6 +988,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         consistency_sampling: bool = False,
         amateur_model: Optional["PreTrainedModel"] = None,
         contrastive_alpha: float = 0.5,
+        contrastive_masking: bool = False,
+        use_aid: bool = False,
+        aid_threshold: float = 0.8,
         mirostat_mode: int = 0,
         mirostat_tau: float = 5.0,
         mirostat_tau_schedule: str = "constant",
@@ -2891,6 +2894,20 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                                 linear_tokens = max(1, curr_masks // remaining_steps)
                                 num_transfer_tokens[b_idx, i] = int((target_tokens + linear_tokens) / 2)
 
+                    if amateur_model is not None and contrastive_masking:
+                        amateur_p = F.softmax(amateur_logits.to(torch.float64), dim=-1)
+                        amateur_x0_p = torch.squeeze(torch.gather(amateur_p, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
+                        confidence = confidence - contrastive_alpha * amateur_x0_p
+
+                    if use_aid:
+                        for b_idx in range(x.shape[0]):
+                            mean_confidence = confidence[b_idx][mask_index[b_idx]].mean().item() if mask_index[b_idx].any() else 0.0
+                            if mean_confidence > aid_threshold:
+                                curr_masks = mask_index[b_idx].sum().item()
+                                extra = (curr_masks - num_transfer_tokens[b_idx, i]) // 2
+                                if extra > 0:
+                                    num_transfer_tokens[b_idx, i] += extra
+
                     if stochastic_unmasking:
                         confidence = torch.where(confidence == -float('inf'), confidence, confidence + torch.rand_like(confidence))
 
@@ -3255,6 +3272,9 @@ class MDLMRequest:
     dry_allowed_length: int = 2
     dry_sequence_breakers: Optional[List[int]] = None
     original_prompt_len: int = 0
+    use_aid: bool = False
+    aid_threshold: float = 0.8
+    contrastive_masking: bool = False
 
     def __eq__(self, other):
         if not isinstance(other, MDLMRequest):
@@ -4525,6 +4545,15 @@ class MDLMContinuousBatchingManager:
                     linear_tokens = max(1, curr_masks // remaining_steps)
                     req.transfer_tokens[0, req.current_step] = int((target_tokens + linear_tokens) / 2)
                 M = req.transfer_tokens[0, req.current_step].item()
+
+            if req.use_aid:
+                mean_confidence = confidence[0][req.mask_index[0]].mean().item() if req.mask_index[0].any() else 0.0
+                if mean_confidence > req.aid_threshold:
+                    curr_masks = req.mask_index[0].sum().item()
+                    extra = (curr_masks - req.transfer_tokens[0, req.current_step].item()) // 2
+                    if extra > 0:
+                        req.transfer_tokens[0, req.current_step] += extra
+                    M = req.transfer_tokens[0, req.current_step].item()
 
             if req.stochastic_unmasking:
                 confidence = torch.where(confidence == -float('inf'), confidence, confidence + torch.rand_like(confidence))
