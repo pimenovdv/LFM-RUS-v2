@@ -751,6 +751,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         length_temperature_scale: float = 0.0,
         length_temperature_schedule: str = "constant",
         min_length_temperature_scale: float = 0.0,
+        temperature_oscillation_amplitude: float = 0.0,
+        temperature_oscillation_frequency: float = 1.0,
         temperature_schedule: str = "constant",
         min_temperature: float = 0.0,
         gumbel_temperature: Optional[float] = None,
@@ -2516,7 +2518,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     logits = logits_processor(x, logits)
 
                 current_temperature = temperature
-                if temperature > 0 or dynamic_temperature_entropy > 0 or tsallis_temperature_entropy > 0 or positional_temperature > 0 or (length_temperature_scale > 0 and temperature > 0):
+                if temperature > 0 or dynamic_temperature_entropy > 0 or tsallis_temperature_entropy > 0 or positional_temperature > 0 or (length_temperature_scale > 0 and temperature > 0) or temperature_oscillation_amplitude > 0:
                     if positional_temperature > 0.0:
                         current_positional_temperature = positional_temperature
                         if positional_temperature_schedule == "linear":
@@ -2587,6 +2589,10 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                             current_length_temperature_scale = length_temperature_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                         current_length_temperature_scale = max(current_length_temperature_scale, min_length_temperature_scale)
                         current_temperature = current_temperature * (1.0 + current_length_temperature_scale * step_ratio)
+
+                    if temperature_oscillation_amplitude > 0.0:
+                        current_temperature = current_temperature + temperature_oscillation_amplitude * math.sin(temperature_oscillation_frequency * 2.0 * math.pi * step_ratio)
+                        current_temperature = max(0.0, current_temperature)
 
                     if dynamic_temperature_entropy > 0.0:
                         current_dynamic_temperature_entropy = dynamic_temperature_entropy
@@ -3068,6 +3074,8 @@ class MDLMRequest:
     length_temperature_scale: float = 0.0
     length_temperature_schedule: str = "constant"
     min_length_temperature_scale: float = 0.0
+    temperature_oscillation_amplitude: float = 0.0
+    temperature_oscillation_frequency: float = 1.0
     dynamic_temperature_entropy: float = 0.0
     dynamic_temperature_entropy_schedule: str = "constant"
     min_dynamic_temperature_entropy: float = 0.0
@@ -4364,7 +4372,7 @@ class MDLMContinuousBatchingManager:
                     )
 
             current_temperature = req.temperature
-            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.tsallis_temperature_entropy > 0 or req.positional_temperature > 0 or req.adaptive_token_temperature > 0 or (req.length_temperature_scale > 0 and req.temperature > 0):
+            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.tsallis_temperature_entropy > 0 or req.positional_temperature > 0 or req.adaptive_token_temperature > 0 or (req.length_temperature_scale > 0 and req.temperature > 0) or req.temperature_oscillation_amplitude > 0:
                 if req.positional_temperature > 0.0:
                     current_positional_temperature = req.positional_temperature
                     if req.positional_temperature_schedule == "linear":
@@ -4428,6 +4436,10 @@ class MDLMContinuousBatchingManager:
 
                     current_length_temperature_scale = max(current_length_temperature_scale, req.min_length_temperature_scale)
                     current_temperature = current_temperature * (1.0 + current_length_temperature_scale * step_ratio)
+
+                if req.temperature_oscillation_amplitude > 0.0:
+                    current_temperature = current_temperature + req.temperature_oscillation_amplitude * math.sin(req.temperature_oscillation_frequency * 2.0 * math.pi * step_ratio)
+                    current_temperature = max(0.0, current_temperature)
 
                 if req.dynamic_temperature_entropy > 0.0:
                     current_dynamic_temperature_entropy = req.dynamic_temperature_entropy
@@ -4495,9 +4507,12 @@ class MDLMContinuousBatchingManager:
                 reshaped_probs = random_logits.view(-1, random_logits.size(-1))
                 reshaped_probs = reshaped_probs + 1e-9
                 x0 = torch.multinomial(reshaped_probs, num_samples=1).view(req_logits.size(0), req_logits.size(1))
-            elif (req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.adaptive_token_temperature > 0 or (req.length_temperature_scale > 0 and req.temperature > 0)) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
+            elif (req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.adaptive_token_temperature > 0 or (req.length_temperature_scale > 0 and req.temperature > 0) or req.temperature_oscillation_amplitude > 0) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
                 # Standard multinomial sampling if gumbel is explicitly disabled or we use fallback standard temp logic
-                req_logits = req_logits / current_temperature
+                if isinstance(current_temperature, torch.Tensor):
+                    req_logits = req_logits / torch.clamp(current_temperature, min=1e-5)
+                else:
+                    req_logits = req_logits / max(current_temperature, 1e-5)
                 probs = F.softmax(req_logits, dim=-1)
                 # Reshape for multinomial: (batch * seq_len, vocab_size)
                 reshaped_probs = probs.view(-1, probs.size(-1))
