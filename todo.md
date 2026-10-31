@@ -14,7 +14,7 @@
 - Интегрировать в `modeling_diffusion.py` и `MDLMContinuousBatchingManager`.
 - Написать тесты.
 
-## [ ] Шаг 128: Внедрение Information-Guided Repetition Penalty (IGRP)
+## [x] Шаг 128: Внедрение Information-Guided Repetition Penalty (IGRP)
 **Цель:** Применять штраф за повторение только к токенам с высоким Information Gain (низкой уверенностью), или наоборот, чтобы лучше контролировать лексическое разнообразие.
 **Детали:**
 - Добавить параметры `igrp_scale` (float) и `igrp_schedule`.

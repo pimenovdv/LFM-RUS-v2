@@ -753,6 +753,8 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         min_length_temperature_scale: float = 0.0,
         temperature_oscillation_amplitude: float = 0.0,
         temperature_oscillation_frequency: float = 1.0,
+        igrp_scale: float = 0.0,
+        igrp_schedule: str = "constant",
         temperature_schedule: str = "constant",
         min_temperature: float = 0.0,
         gumbel_temperature: Optional[float] = None,
@@ -1810,6 +1812,18 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                         current_repetition_penalty = repetition_penalty * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                 current_repetition_penalty = max(current_repetition_penalty, min_repetition_penalty)
 
+                current_igrp_scale = igrp_scale
+                if igrp_scale != 0.0 and igrp_schedule != "constant":
+                    if igrp_schedule == "linear":
+                        current_igrp_scale = igrp_scale * (1.0 - step_ratio)
+                    elif igrp_schedule == "cosine":
+                        current_igrp_scale = igrp_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif igrp_schedule == "exponential":
+                        current_igrp_scale = igrp_scale * math.exp(-3.0 * step_ratio)
+                    elif igrp_schedule == "cyclic":
+                        current_igrp_scale = igrp_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_igrp_scale = max(current_igrp_scale, 0.0)
+
                 current_repetition_decay = repetition_decay
                 if repetition_decay != 0.0 and repetition_decay_schedule != "constant":
                     if repetition_decay_schedule == "linear":
@@ -1871,9 +1885,17 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
                                     eff_penalty = 1.0 + (current_repetition_penalty - 1.0) * torch.exp(-current_repetition_decay * distances)
                                     eff_penalty = eff_penalty.unsqueeze(0)  # Shape: (1, num_unique_tokens) to broadcast with score
-                                    penalized_score = torch.where(score < 0, score * eff_penalty, score / eff_penalty)
                                 else:
-                                    penalized_score = torch.where(score < 0, score * current_repetition_penalty, score / current_repetition_penalty)
+                                    eff_penalty = current_repetition_penalty
+
+                                if current_igrp_scale > 0.0:
+                                    token_log_probs = F.log_softmax(logits[b, :], dim=-1)[:, unique_tokens]
+                                    token_info = -token_log_probs
+                                    if not isinstance(eff_penalty, torch.Tensor):
+                                        eff_penalty = torch.tensor(eff_penalty, device=logits.device, dtype=logits.dtype)
+                                    eff_penalty = eff_penalty + current_igrp_scale * token_info
+
+                                penalized_score = torch.where(score < 0, score * eff_penalty, score / eff_penalty)
                                 logits[b, :, unique_tokens] = penalized_score
 
                             if current_frequency_penalty != 0.0 or current_presence_penalty != 0.0:
@@ -3076,6 +3098,8 @@ class MDLMRequest:
     min_length_temperature_scale: float = 0.0
     temperature_oscillation_amplitude: float = 0.0
     temperature_oscillation_frequency: float = 1.0
+    igrp_scale: float = 0.0
+    igrp_schedule: str = "constant"
     dynamic_temperature_entropy: float = 0.0
     dynamic_temperature_entropy_schedule: str = "constant"
     min_dynamic_temperature_entropy: float = 0.0
@@ -3430,6 +3454,18 @@ class MDLMContinuousBatchingManager:
                     current_repetition_penalty = req.repetition_penalty * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
             current_repetition_penalty = max(current_repetition_penalty, req.min_repetition_penalty)
 
+            current_igrp_scale = req.igrp_scale
+            if req.igrp_scale != 0.0 and req.igrp_schedule != "constant":
+                if req.igrp_schedule == "linear":
+                    current_igrp_scale = req.igrp_scale * (1.0 - step_ratio)
+                elif req.igrp_schedule == "cosine":
+                    current_igrp_scale = req.igrp_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.igrp_schedule == "exponential":
+                    current_igrp_scale = req.igrp_scale * math.exp(-3.0 * step_ratio)
+                elif req.igrp_schedule == "cyclic":
+                    current_igrp_scale = req.igrp_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+            current_igrp_scale = max(current_igrp_scale, 0.0)
+
             current_repetition_decay = req.repetition_decay
             if req.repetition_decay != 0.0 and req.repetition_decay_schedule != "constant":
                 if req.repetition_decay_schedule == "linear":
@@ -3488,9 +3524,17 @@ class MDLMContinuousBatchingManager:
 
                             eff_penalty = 1.0 + (current_repetition_penalty - 1.0) * torch.exp(-current_repetition_decay * distances)
                             eff_penalty = eff_penalty.unsqueeze(0)
-                            penalized_score = torch.where(score < 0, score * eff_penalty, score / eff_penalty)
                         else:
-                            penalized_score = torch.where(score < 0, score * current_repetition_penalty, score / current_repetition_penalty)
+                            eff_penalty = current_repetition_penalty
+
+                        if current_igrp_scale > 0.0:
+                            token_log_probs = F.log_softmax(req_logits[0, :], dim=-1)[:, unique_tokens]
+                            token_info = -token_log_probs
+                            if not isinstance(eff_penalty, torch.Tensor):
+                                eff_penalty = torch.tensor(eff_penalty, device=req_logits.device, dtype=req_logits.dtype)
+                            eff_penalty = eff_penalty + current_igrp_scale * token_info
+
+                        penalized_score = torch.where(score < 0, score * eff_penalty, score / eff_penalty)
 
                         # Use torch.scatter or index manipulation to avoid warnings, but for simplicity
                         # and since we clone, index_put is fine without expansion issues
