@@ -905,6 +905,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         tsallis_temperature_entropy: float = 0.0,
         tsallis_temperature_entropy_schedule: str = "constant",
         min_tsallis_temperature_entropy: float = 0.0,
+        entropic_smoothing_alpha: float = 0.0,
         tsallis_q: float = 1.0,
         encoder_repetition_penalty: float = 1.0,
         encoder_frequency_penalty: float = 0.0,
@@ -2540,7 +2541,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     logits = logits_processor(x, logits)
 
                 current_temperature = temperature
-                if temperature > 0 or dynamic_temperature_entropy > 0 or tsallis_temperature_entropy > 0 or positional_temperature > 0 or (length_temperature_scale > 0 and temperature > 0) or temperature_oscillation_amplitude > 0:
+                if temperature > 0 or dynamic_temperature_entropy > 0 or tsallis_temperature_entropy > 0 or positional_temperature > 0 or (length_temperature_scale > 0 and temperature > 0) or temperature_oscillation_amplitude > 0 or entropic_smoothing_alpha > 0:
                     if positional_temperature > 0.0:
                         current_positional_temperature = positional_temperature
                         if positional_temperature_schedule == "linear":
@@ -2653,6 +2654,12 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                             tsallis_entropy_val = (1.0 - torch.sum(probs ** tsallis_q, dim=-1, keepdim=True)) / (tsallis_q - 1.0)
 
                         current_temperature = current_temperature + current_tsallis_temperature_entropy * tsallis_entropy_val
+
+                    if entropic_smoothing_alpha > 0.0:
+                        probs = F.softmax(logits, dim=-1)
+                        entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                        tles_temp = 1.0 + entropic_smoothing_alpha / (entropy + 1e-5)
+                        current_temperature = current_temperature * tles_temp
 
                     # Handle case where current_temperature becomes a tensor (from entropy)
                     if isinstance(current_temperature, torch.Tensor):
@@ -3107,6 +3114,7 @@ class MDLMRequest:
     tsallis_temperature_entropy_schedule: str = "constant"
     min_tsallis_temperature_entropy: float = 0.0
     tsallis_q: float = 1.0
+    entropic_smoothing_alpha: float = 0.0
     gumbel_temperature: Optional[float] = None
     gumbel_temperature_schedule: str = "constant"
     min_gumbel_temperature: float = 0.0
@@ -4416,7 +4424,7 @@ class MDLMContinuousBatchingManager:
                     )
 
             current_temperature = req.temperature
-            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.tsallis_temperature_entropy > 0 or req.positional_temperature > 0 or req.adaptive_token_temperature > 0 or (req.length_temperature_scale > 0 and req.temperature > 0) or req.temperature_oscillation_amplitude > 0:
+            if req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.tsallis_temperature_entropy > 0 or req.positional_temperature > 0 or req.adaptive_token_temperature > 0 or (req.length_temperature_scale > 0 and req.temperature > 0) or req.temperature_oscillation_amplitude > 0 or req.entropic_smoothing_alpha > 0:
                 if req.positional_temperature > 0.0:
                     current_positional_temperature = req.positional_temperature
                     if req.positional_temperature_schedule == "linear":
@@ -4540,6 +4548,12 @@ class MDLMContinuousBatchingManager:
 
                     current_temperature = current_temperature + current_tsallis_temperature_entropy * tsallis_entropy_val
 
+                if req.entropic_smoothing_alpha > 0.0:
+                    probs = F.softmax(req_logits, dim=-1)
+                    entropy = -torch.sum(probs * torch.log(probs + 1e-9), dim=-1, keepdim=True)
+                    tles_temp = 1.0 + req.entropic_smoothing_alpha / (entropy + 1e-5)
+                    current_temperature = current_temperature * tles_temp
+
                 if isinstance(current_temperature, torch.Tensor):
                     current_temperature = torch.clamp(current_temperature, min=1e-5)
                 else:
@@ -4551,7 +4565,7 @@ class MDLMContinuousBatchingManager:
                 reshaped_probs = random_logits.view(-1, random_logits.size(-1))
                 reshaped_probs = reshaped_probs + 1e-9
                 x0 = torch.multinomial(reshaped_probs, num_samples=1).view(req_logits.size(0), req_logits.size(1))
-            elif (req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.adaptive_token_temperature > 0 or (req.length_temperature_scale > 0 and req.temperature > 0) or req.temperature_oscillation_amplitude > 0) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
+            elif (req.temperature > 0 or req.dynamic_temperature_entropy > 0 or req.adaptive_token_temperature > 0 or (req.length_temperature_scale > 0 and req.temperature > 0) or req.temperature_oscillation_amplitude > 0 or req.entropic_smoothing_alpha > 0) and (req.gumbel_temperature is None or req.gumbel_temperature == 0.0):
                 # Standard multinomial sampling if gumbel is explicitly disabled or we use fallback standard temp logic
                 if isinstance(current_temperature, torch.Tensor):
                     req_logits = req_logits / torch.clamp(current_temperature, min=1e-5)
