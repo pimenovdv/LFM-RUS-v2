@@ -140,3 +140,35 @@ def test_tsallis_entropy_continuous_batching(mock_model, mocker):
     assert mock_softmax.called
     # multinomial may not be called depending on other temperature settings/flags, the execution check is enough
     # assert mock_multinomial.called
+
+
+def test_entropic_smoothing_alpha(mocker):
+    from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, DiffusionConfig
+    import torch
+
+    config = DiffusionConfig(vocab_size=100, mask_token_id=99, base_config_dict={'vocab_size': 100, 'model_type': 'gpt2'})
+    model = DiffusionModelForConditionalGeneration(config)
+
+    input_ids = torch.randint(0, 100, (1, 10))
+
+    class MockOutput:
+        def __init__(self, logits):
+            self.logits = logits
+
+    mocker.patch.object(model, "forward", return_value=MockOutput(torch.randn(1, 11, config.vocab_size)))
+    mocker.patch("torch.nn.functional.softmax", return_value=torch.ones(1, 11, config.vocab_size)/config.vocab_size)
+
+    spy_multinomial = mocker.patch("torch.multinomial", return_value=torch.zeros((11, 1), dtype=torch.long))
+
+    model.generate(
+        input_ids,
+        temperature=1.0,
+        entropic_smoothing_alpha=0.5,
+        steps=2,
+        max_new_tokens=1
+    )
+
+    model.generate_dynamic_batch([
+        {"input_ids": input_ids, "max_new_tokens": 1, "total_steps": 2, "temperature": 1.0, "entropic_smoothing_alpha": 0.5}
+    ])
+    assert spy_multinomial.called
