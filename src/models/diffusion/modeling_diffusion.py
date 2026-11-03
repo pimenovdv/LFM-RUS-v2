@@ -996,6 +996,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         contrastive_masking: bool = False,
         use_aid: bool = False,
         aid_threshold: float = 0.8,
+        denoising_momentum: float = 0.0,
         mirostat_mode: int = 0,
         mirostat_tau: float = 5.0,
         mirostat_tau_schedule: str = "constant",
@@ -1113,6 +1114,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         retrieved_len = 0
 
         running_logits = None
+        running_x0_p = None
 
         for num_block in range(num_blocks):
             if max_time is not None and time.time() - start_time > max_time:
@@ -2893,6 +2895,19 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     else:
                         x0_p = torch.ones((x0.shape[0], x0.shape[1]), device=x0.device)
 
+                    if denoising_momentum > 0.0:
+                        if running_x0_p is None:
+                            running_x0_p = x0_p.clone().detach()
+                        else:
+                            if running_x0_p.size(1) < x0_p.size(1):
+                                pad_len = x0_p.size(1) - running_x0_p.size(1)
+                                pad_tensor = torch.zeros((running_x0_p.size(0), pad_len), device=running_x0_p.device, dtype=running_x0_p.dtype)
+                                running_x0_p = torch.cat([running_x0_p, pad_tensor], dim=1)
+                            elif running_x0_p.size(1) > x0_p.size(1):
+                                running_x0_p = running_x0_p[:, :x0_p.size(1)]
+                            x0_p = denoising_momentum * running_x0_p + (1.0 - denoising_momentum) * x0_p
+                        running_x0_p = x0_p.clone().detach()
+
                     x0_p[:, block_end:] = -np.inf
                     x0 = torch.where(mask_index, x0, x)
                     confidence = torch.where(mask_index, x0_p, -torch.tensor(float('inf'), device=device))
@@ -3314,6 +3329,8 @@ class MDLMRequest:
     original_prompt_len: int = 0
     use_aid: bool = False
     aid_threshold: float = 0.8
+    denoising_momentum: float = 0.0
+    running_x0_p: Optional[torch.Tensor] = None
     contrastive_masking: bool = False
 
     def __eq__(self, other):
@@ -4584,6 +4601,19 @@ class MDLMContinuousBatchingManager:
 
             p = F.softmax(req_logits.to(torch.float64), dim=-1)
             x0_p = torch.squeeze(torch.gather(p, dim=-1, index=torch.unsqueeze(x0, -1)), -1)
+
+            if req.denoising_momentum > 0.0:
+                if req.running_x0_p is None:
+                    req.running_x0_p = x0_p.clone().detach()
+                else:
+                    if req.running_x0_p.size(1) < x0_p.size(1):
+                        pad_len = x0_p.size(1) - req.running_x0_p.size(1)
+                        pad_tensor = torch.zeros((req.running_x0_p.size(0), pad_len), device=req.running_x0_p.device, dtype=req.running_x0_p.dtype)
+                        req.running_x0_p = torch.cat([req.running_x0_p, pad_tensor], dim=1)
+                    elif req.running_x0_p.size(1) > x0_p.size(1):
+                        req.running_x0_p = req.running_x0_p[:, :x0_p.size(1)]
+                    x0_p = req.denoising_momentum * req.running_x0_p + (1.0 - req.denoising_momentum) * x0_p
+                req.running_x0_p = x0_p.clone().detach()
 
             confidence = torch.where(req.x == mask_id, x0_p, -torch.tensor(float('inf'), device=req.x.device))
 
