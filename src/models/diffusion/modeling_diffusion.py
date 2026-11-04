@@ -863,6 +863,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         exponential_noise_scale: float = 0.0,
         exponential_noise_schedule: str = "constant",
         min_exponential_noise_scale: float = 0.0,
+        half_normal_noise_scale: float = 0.0,
+        half_normal_noise_schedule: str = "constant",
+        min_half_normal_noise_scale: float = 0.0,
         gamma_noise_scale: float = 0.0,
         gamma_noise_schedule: str = "constant",
         min_gamma_noise_scale: float = 0.0,
@@ -2139,6 +2142,28 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = exponential_dist.sample(logits.shape).to(logits.device) * current_exponential_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
+                current_half_normal_noise_scale = 0.0
+                if half_normal_noise_scale > 0.0:
+                    if half_normal_noise_schedule == "linear":
+                        current_half_normal_noise_scale = half_normal_noise_scale * (1.0 - step_ratio)
+                    elif half_normal_noise_schedule == "cosine":
+                        current_half_normal_noise_scale = half_normal_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif half_normal_noise_schedule == "exponential":
+                        current_half_normal_noise_scale = half_normal_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif half_normal_noise_schedule == "cyclic":
+                        current_half_normal_noise_scale = half_normal_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_half_normal_noise_scale = half_normal_noise_scale
+                    current_half_normal_noise_scale = max(current_half_normal_noise_scale, min_half_normal_noise_scale)
+                else:
+                    current_half_normal_noise_scale = half_normal_noise_scale
+
+                if current_half_normal_noise_scale > 0.0:
+                    half_normal_dist = torch.distributions.half_normal.HalfNormal(scale=1.0)
+                    noise = half_normal_dist.sample(logits.shape).to(logits.device) * current_half_normal_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
+
                 if gamma_noise_scale > 0.0:
                     if gamma_noise_schedule == "linear":
                         current_gamma_noise_scale = gamma_noise_scale * (1.0 - step_ratio)
@@ -3260,6 +3285,9 @@ class MDLMRequest:
     exponential_noise_scale: float = 0.0
     exponential_noise_schedule: str = "constant"
     min_exponential_noise_scale: float = 0.0
+    half_normal_noise_scale: float = 0.0
+    half_normal_noise_schedule: str = "constant"
+    min_half_normal_noise_scale: float = 0.0
     gamma_noise_scale: float = 0.0
     gamma_noise_schedule: str = "constant"
     min_gamma_noise_scale: float = 0.0
@@ -3955,6 +3983,25 @@ class MDLMContinuousBatchingManager:
                     exponential_dist = torch.distributions.exponential.Exponential(rate=1.0)
                     noise = exponential_dist.sample(req_logits.shape).to(req_logits.device) * current_exponential_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            current_half_normal_noise_scale = 0.0
+            if req.half_normal_noise_scale > 0.0:
+                current_half_normal_noise_scale = req.half_normal_noise_scale
+                if req.half_normal_noise_schedule == "linear":
+                    current_half_normal_noise_scale = req.half_normal_noise_scale * (1.0 - step_ratio)
+                elif req.half_normal_noise_schedule == "cosine":
+                    current_half_normal_noise_scale = req.half_normal_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.half_normal_noise_schedule == "exponential":
+                    current_half_normal_noise_scale = req.half_normal_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.half_normal_noise_schedule == "cyclic":
+                    current_half_normal_noise_scale = req.half_normal_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_half_normal_noise_scale = max(current_half_normal_noise_scale, req.min_half_normal_noise_scale)
+
+                if current_half_normal_noise_scale > 0.0:
+                    half_normal_dist = torch.distributions.half_normal.HalfNormal(scale=1.0)
+                    noise = half_normal_dist.sample(req_logits.shape).to(req_logits.device) * current_half_normal_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
 
             if req.gamma_noise_scale > 0.0:
                 current_gamma_noise_scale = req.gamma_noise_scale
