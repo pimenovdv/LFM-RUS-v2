@@ -29,10 +29,16 @@ class DiffusionConfig(PretrainedConfig):
         use_flow_matching=False,
         use_self_conditioning=False,
         logit_softcapping=0.0,
+        half_normal_noise_scale=0.0,
+        half_normal_noise_schedule="constant",
+        min_half_normal_noise_scale=0.0,
         **kwargs
     ):
         super().__init__(**kwargs)
         self.logit_softcapping = logit_softcapping
+        self.half_normal_noise_scale = half_normal_noise_scale
+        self.half_normal_noise_schedule = half_normal_noise_schedule
+        self.min_half_normal_noise_scale = min_half_normal_noise_scale
         self.use_flow_matching = use_flow_matching
         self.use_self_conditioning = use_self_conditioning
         self.use_latent_diffusion = use_latent_diffusion
