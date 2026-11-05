@@ -32,6 +32,10 @@ class DiffusionConfig(PretrainedConfig):
         half_normal_noise_scale=0.0,
         half_normal_noise_schedule="constant",
         min_half_normal_noise_scale=0.0,
+        chi_square_noise_scale=0.0,
+        chi_square_noise_schedule="constant",
+        min_chi_square_noise_scale=0.0,
+        chi_square_df=1.0,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -39,6 +43,10 @@ class DiffusionConfig(PretrainedConfig):
         self.half_normal_noise_scale = half_normal_noise_scale
         self.half_normal_noise_schedule = half_normal_noise_schedule
         self.min_half_normal_noise_scale = min_half_normal_noise_scale
+        self.chi_square_noise_scale = chi_square_noise_scale
+        self.chi_square_noise_schedule = chi_square_noise_schedule
+        self.min_chi_square_noise_scale = min_chi_square_noise_scale
+        self.chi_square_df = chi_square_df
         self.use_flow_matching = use_flow_matching
         self.use_self_conditioning = use_self_conditioning
         self.use_latent_diffusion = use_latent_diffusion
