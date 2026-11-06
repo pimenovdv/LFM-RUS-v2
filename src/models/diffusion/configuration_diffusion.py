@@ -36,6 +36,11 @@ class DiffusionConfig(PretrainedConfig):
         chi_square_noise_schedule="constant",
         min_chi_square_noise_scale=0.0,
         chi_square_df=1.0,
+        fisher_snedecor_noise_scale=0.0,
+        fisher_snedecor_noise_schedule="constant",
+        min_fisher_snedecor_noise_scale=0.0,
+        fisher_snedecor_df1=5.0,
+        fisher_snedecor_df2=5.0,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -47,6 +52,11 @@ class DiffusionConfig(PretrainedConfig):
         self.chi_square_noise_schedule = chi_square_noise_schedule
         self.min_chi_square_noise_scale = min_chi_square_noise_scale
         self.chi_square_df = chi_square_df
+        self.fisher_snedecor_noise_scale = fisher_snedecor_noise_scale
+        self.fisher_snedecor_noise_schedule = fisher_snedecor_noise_schedule
+        self.min_fisher_snedecor_noise_scale = min_fisher_snedecor_noise_scale
+        self.fisher_snedecor_df1 = fisher_snedecor_df1
+        self.fisher_snedecor_df2 = fisher_snedecor_df2
         self.use_flow_matching = use_flow_matching
         self.use_self_conditioning = use_self_conditioning
         self.use_latent_diffusion = use_latent_diffusion
