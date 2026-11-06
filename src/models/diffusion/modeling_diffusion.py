@@ -870,6 +870,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         chi_square_noise_schedule: str = "constant",
         min_chi_square_noise_scale: float = 0.0,
         chi_square_df: float = 1.0,
+        fisher_snedecor_noise_scale: float = 0.0,
+        fisher_snedecor_noise_schedule: str = "constant",
+        min_fisher_snedecor_noise_scale: float = 0.0,
+        fisher_snedecor_df1: float = 5.0,
+        fisher_snedecor_df2: float = 5.0,
         gamma_noise_scale: float = 0.0,
         gamma_noise_schedule: str = "constant",
         min_gamma_noise_scale: float = 0.0,
@@ -2188,6 +2193,26 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = chi_square_dist.sample(logits.shape).to(logits.device) * current_chi_square_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
+                current_fisher_snedecor_noise_scale = 0.0
+                if fisher_snedecor_noise_scale > 0.0:
+                    if fisher_snedecor_noise_schedule == "linear":
+                        current_fisher_snedecor_noise_scale = fisher_snedecor_noise_scale * (1.0 - step_ratio)
+                    elif fisher_snedecor_noise_schedule == "cosine":
+                        current_fisher_snedecor_noise_scale = fisher_snedecor_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif fisher_snedecor_noise_schedule == "exponential":
+                        current_fisher_snedecor_noise_scale = fisher_snedecor_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif fisher_snedecor_noise_schedule == "cyclic":
+                        current_fisher_snedecor_noise_scale = fisher_snedecor_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_fisher_snedecor_noise_scale = fisher_snedecor_noise_scale
+                    current_fisher_snedecor_noise_scale = max(current_fisher_snedecor_noise_scale, min_fisher_snedecor_noise_scale)
+                else:
+                    current_fisher_snedecor_noise_scale = fisher_snedecor_noise_scale
+
+                if current_fisher_snedecor_noise_scale > 0.0:
+                    fisher_snedecor_dist = torch.distributions.fishersnedecor.FisherSnedecor(df1=fisher_snedecor_df1, df2=fisher_snedecor_df2)
+                    noise = fisher_snedecor_dist.sample(logits.shape).to(logits.device) * current_fisher_snedecor_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
                 if gamma_noise_scale > 0.0:
                     if gamma_noise_schedule == "linear":
@@ -3317,6 +3342,11 @@ class MDLMRequest:
     chi_square_noise_schedule: str = "constant"
     min_chi_square_noise_scale: float = 0.0
     chi_square_df: float = 1.0
+    fisher_snedecor_noise_scale: float = 0.0
+    fisher_snedecor_noise_schedule: str = "constant"
+    min_fisher_snedecor_noise_scale: float = 0.0
+    fisher_snedecor_df1: float = 5.0
+    fisher_snedecor_df2: float = 5.0
     gamma_noise_scale: float = 0.0
     gamma_noise_schedule: str = "constant"
     min_gamma_noise_scale: float = 0.0
@@ -4047,6 +4077,24 @@ class MDLMContinuousBatchingManager:
                 if current_chi_square_noise_scale > 0.0:
                     chi_square_dist = torch.distributions.Chi2(df=req.chi_square_df)
                     noise = chi_square_dist.sample(req_logits.shape).to(req_logits.device) * current_chi_square_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            current_fisher_snedecor_noise_scale = 0.0
+            if req.fisher_snedecor_noise_scale > 0.0:
+                current_fisher_snedecor_noise_scale = req.fisher_snedecor_noise_scale
+                if req.fisher_snedecor_noise_schedule == "linear":
+                    current_fisher_snedecor_noise_scale = req.fisher_snedecor_noise_scale * (1.0 - step_ratio)
+                elif req.fisher_snedecor_noise_schedule == "cosine":
+                    current_fisher_snedecor_noise_scale = req.fisher_snedecor_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.fisher_snedecor_noise_schedule == "exponential":
+                    current_fisher_snedecor_noise_scale = req.fisher_snedecor_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.fisher_snedecor_noise_schedule == "cyclic":
+                    current_fisher_snedecor_noise_scale = req.fisher_snedecor_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_fisher_snedecor_noise_scale = max(current_fisher_snedecor_noise_scale, req.min_fisher_snedecor_noise_scale)
+
+                if current_fisher_snedecor_noise_scale > 0.0:
+                    fisher_snedecor_dist = torch.distributions.fishersnedecor.FisherSnedecor(df1=req.fisher_snedecor_df1, df2=req.fisher_snedecor_df2)
+                    noise = fisher_snedecor_dist.sample(req_logits.shape).to(req_logits.device) * current_fisher_snedecor_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
 
