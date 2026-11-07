@@ -875,6 +875,9 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         min_fisher_snedecor_noise_scale: float = 0.0,
         fisher_snedecor_df1: float = 5.0,
         fisher_snedecor_df2: float = 5.0,
+        half_cauchy_noise_scale: float = 0.0,
+        half_cauchy_noise_schedule: str = "constant",
+        min_half_cauchy_noise_scale: float = 0.0,
         gamma_noise_scale: float = 0.0,
         gamma_noise_schedule: str = "constant",
         min_gamma_noise_scale: float = 0.0,
@@ -2214,6 +2217,27 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = fisher_snedecor_dist.sample(logits.shape).to(logits.device) * current_fisher_snedecor_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
+                current_half_cauchy_noise_scale = 0.0
+                if half_cauchy_noise_scale > 0.0:
+                    if half_cauchy_noise_schedule == "linear":
+                        current_half_cauchy_noise_scale = half_cauchy_noise_scale * (1.0 - step_ratio)
+                    elif half_cauchy_noise_schedule == "cosine":
+                        current_half_cauchy_noise_scale = half_cauchy_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif half_cauchy_noise_schedule == "exponential":
+                        current_half_cauchy_noise_scale = half_cauchy_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif half_cauchy_noise_schedule == "cyclic":
+                        current_half_cauchy_noise_scale = half_cauchy_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_half_cauchy_noise_scale = half_cauchy_noise_scale
+                    current_half_cauchy_noise_scale = max(current_half_cauchy_noise_scale, min_half_cauchy_noise_scale)
+                else:
+                    current_half_cauchy_noise_scale = half_cauchy_noise_scale
+
+                if current_half_cauchy_noise_scale > 0.0:
+                    half_cauchy_dist = torch.distributions.HalfCauchy(scale=1.0)
+                    noise = half_cauchy_dist.sample(logits.shape).to(logits.device) * current_half_cauchy_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
                 if gamma_noise_scale > 0.0:
                     if gamma_noise_schedule == "linear":
                         current_gamma_noise_scale = gamma_noise_scale * (1.0 - step_ratio)
@@ -3347,6 +3371,9 @@ class MDLMRequest:
     min_fisher_snedecor_noise_scale: float = 0.0
     fisher_snedecor_df1: float = 5.0
     fisher_snedecor_df2: float = 5.0
+    half_cauchy_noise_scale: float = 0.0
+    half_cauchy_noise_schedule: str = "constant"
+    min_half_cauchy_noise_scale: float = 0.0
     gamma_noise_scale: float = 0.0
     gamma_noise_schedule: str = "constant"
     min_gamma_noise_scale: float = 0.0
@@ -4097,6 +4124,23 @@ class MDLMContinuousBatchingManager:
                     noise = fisher_snedecor_dist.sample(req_logits.shape).to(req_logits.device) * current_fisher_snedecor_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
+            current_half_cauchy_noise_scale = 0.0
+            if req.half_cauchy_noise_scale > 0.0:
+                current_half_cauchy_noise_scale = req.half_cauchy_noise_scale
+                if req.half_cauchy_noise_schedule == "linear":
+                    current_half_cauchy_noise_scale = req.half_cauchy_noise_scale * (1.0 - step_ratio)
+                elif req.half_cauchy_noise_schedule == "cosine":
+                    current_half_cauchy_noise_scale = req.half_cauchy_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.half_cauchy_noise_schedule == "exponential":
+                    current_half_cauchy_noise_scale = req.half_cauchy_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.half_cauchy_noise_schedule == "cyclic":
+                    current_half_cauchy_noise_scale = req.half_cauchy_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_half_cauchy_noise_scale = max(current_half_cauchy_noise_scale, req.min_half_cauchy_noise_scale)
+
+                if current_half_cauchy_noise_scale > 0.0:
+                    half_cauchy_dist = torch.distributions.HalfCauchy(scale=1.0)
+                    noise = half_cauchy_dist.sample(req_logits.shape).to(req_logits.device) * current_half_cauchy_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
             if req.gamma_noise_scale > 0.0:
                 current_gamma_noise_scale = req.gamma_noise_scale
