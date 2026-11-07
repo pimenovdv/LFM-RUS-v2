@@ -41,6 +41,9 @@ class DiffusionConfig(PretrainedConfig):
         min_fisher_snedecor_noise_scale=0.0,
         fisher_snedecor_df1=5.0,
         fisher_snedecor_df2=5.0,
+        half_cauchy_noise_scale=0.0,
+        half_cauchy_noise_schedule="constant",
+        min_half_cauchy_noise_scale=0.0,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -57,6 +60,9 @@ class DiffusionConfig(PretrainedConfig):
         self.min_fisher_snedecor_noise_scale = min_fisher_snedecor_noise_scale
         self.fisher_snedecor_df1 = fisher_snedecor_df1
         self.fisher_snedecor_df2 = fisher_snedecor_df2
+        self.half_cauchy_noise_scale = half_cauchy_noise_scale
+        self.half_cauchy_noise_schedule = half_cauchy_noise_schedule
+        self.min_half_cauchy_noise_scale = min_half_cauchy_noise_scale
         self.use_flow_matching = use_flow_matching
         self.use_self_conditioning = use_self_conditioning
         self.use_latent_diffusion = use_latent_diffusion
