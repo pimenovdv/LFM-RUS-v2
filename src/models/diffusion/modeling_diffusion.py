@@ -3374,6 +3374,11 @@ class MDLMRequest:
     half_cauchy_noise_scale: float = 0.0
     half_cauchy_noise_schedule: str = "constant"
     min_half_cauchy_noise_scale: float = 0.0
+    kumaraswamy_noise_scale: float = 0.0
+    kumaraswamy_noise_schedule: str = "constant"
+    min_kumaraswamy_noise_scale: float = 0.0
+    kumaraswamy_a: float = 2.0
+    kumaraswamy_b: float = 2.0
     gamma_noise_scale: float = 0.0
     gamma_noise_schedule: str = "constant"
     min_gamma_noise_scale: float = 0.0
