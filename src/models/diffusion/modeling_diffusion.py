@@ -897,6 +897,19 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         dirichlet_noise_schedule: str = "constant",
         min_dirichlet_noise_scale: float = 0.0,
         dirichlet_noise_alpha: float = 1.0,
+        inverse_gamma_noise_scale: float = 0.0,
+        inverse_gamma_noise_schedule: str = "constant",
+        min_inverse_gamma_noise_scale: float = 0.0,
+        inverse_gamma_concentration: float = 1.0,
+        geometric_noise_scale: float = 0.0,
+        geometric_noise_schedule: str = "constant",
+        min_geometric_noise_scale: float = 0.0,
+        geometric_probs: float = 0.5,
+        negative_binomial_noise_scale: float = 0.0,
+        negative_binomial_noise_schedule: str = "constant",
+        min_negative_binomial_noise_scale: float = 0.0,
+        negative_binomial_total_count: float = 1.0,
+        negative_binomial_probs: float = 0.5,
         poisson_noise_scale: float = 0.0,
         poisson_noise_schedule: str = "constant",
         min_poisson_noise_scale: float = 0.0,
@@ -2318,6 +2331,84 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     dirichlet_dist = torch.distributions.dirichlet.Dirichlet(alpha_tensor)
                     noise = dirichlet_dist.sample(logits.shape[:-1]).to(logits.device) * current_dirichlet_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+                current_inverse_gamma_noise_scale = kwargs.get("inverse_gamma_noise_scale", getattr(self.config, "inverse_gamma_noise_scale", 0.0))
+                if isinstance(current_inverse_gamma_noise_scale, float) and current_inverse_gamma_noise_scale > 0.0:
+                    inverse_gamma_noise_schedule = kwargs.get("inverse_gamma_noise_schedule", getattr(self.config, "inverse_gamma_noise_schedule", "constant"))
+                    min_inverse_gamma_noise_scale = kwargs.get("min_inverse_gamma_noise_scale", getattr(self.config, "min_inverse_gamma_noise_scale", 0.0))
+                    inverse_gamma_concentration = kwargs.get("inverse_gamma_concentration", getattr(self.config, "inverse_gamma_concentration", 1.0))
+                    if inverse_gamma_noise_schedule == "linear":
+                        current_inverse_gamma_noise_scale = current_inverse_gamma_noise_scale * (1.0 - step_ratio)
+                    elif inverse_gamma_noise_schedule == "cosine":
+                        current_inverse_gamma_noise_scale = current_inverse_gamma_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif inverse_gamma_noise_schedule == "exponential":
+                        current_inverse_gamma_noise_scale = current_inverse_gamma_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif inverse_gamma_noise_schedule == "cyclic":
+                        current_inverse_gamma_noise_scale = current_inverse_gamma_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_inverse_gamma_noise_scale = max(current_inverse_gamma_noise_scale, min_inverse_gamma_noise_scale)
+
+                    if isinstance(current_inverse_gamma_noise_scale, float) and current_inverse_gamma_noise_scale > 0.0:
+                        try:
+                            from torch.distributions import InverseGamma
+                            concentration_tensor = torch.full((logits.shape[-1],), inverse_gamma_concentration, device=logits.device)
+                            rate_tensor = torch.ones_like(concentration_tensor)
+                            inverse_gamma_dist = InverseGamma(concentration_tensor, rate_tensor)
+                            noise = inverse_gamma_dist.sample(logits.shape[:-1]).to(logits.device) * current_inverse_gamma_noise_scale
+                            logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+                        except ImportError:
+                            pass # PyTorch may not have InverseGamma in some versions
+
+                current_geometric_noise_scale = kwargs.get("geometric_noise_scale", getattr(self.config, "geometric_noise_scale", 0.0))
+                if isinstance(current_geometric_noise_scale, float) and current_geometric_noise_scale > 0.0:
+                    geometric_noise_schedule = kwargs.get("geometric_noise_schedule", getattr(self.config, "geometric_noise_schedule", "constant"))
+                    min_geometric_noise_scale = kwargs.get("min_geometric_noise_scale", getattr(self.config, "min_geometric_noise_scale", 0.0))
+                    geometric_probs = kwargs.get("geometric_probs", getattr(self.config, "geometric_probs", 0.5))
+                    if geometric_noise_schedule == "linear":
+                        current_geometric_noise_scale = current_geometric_noise_scale * (1.0 - step_ratio)
+                    elif geometric_noise_schedule == "cosine":
+                        current_geometric_noise_scale = current_geometric_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif geometric_noise_schedule == "exponential":
+                        current_geometric_noise_scale = current_geometric_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif geometric_noise_schedule == "cyclic":
+                        current_geometric_noise_scale = current_geometric_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_geometric_noise_scale = max(current_geometric_noise_scale, min_geometric_noise_scale)
+
+                    if isinstance(current_geometric_noise_scale, float) and current_geometric_noise_scale > 0.0:
+                        try:
+                            from torch.distributions import Geometric
+                            probs_tensor = torch.full((logits.shape[-1],), geometric_probs, device=logits.device)
+                            geometric_dist = Geometric(probs_tensor)
+                            noise = geometric_dist.sample(logits.shape[:-1]).to(logits.device) * current_geometric_noise_scale
+                            logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+                        except ImportError:
+                            pass
+
+                current_negative_binomial_noise_scale = kwargs.get("negative_binomial_noise_scale", getattr(self.config, "negative_binomial_noise_scale", 0.0))
+                if isinstance(current_negative_binomial_noise_scale, float) and current_negative_binomial_noise_scale > 0.0:
+                    negative_binomial_noise_schedule = kwargs.get("negative_binomial_noise_schedule", getattr(self.config, "negative_binomial_noise_schedule", "constant"))
+                    min_negative_binomial_noise_scale = kwargs.get("min_negative_binomial_noise_scale", getattr(self.config, "min_negative_binomial_noise_scale", 0.0))
+                    negative_binomial_total_count = kwargs.get("negative_binomial_total_count", getattr(self.config, "negative_binomial_total_count", 1.0))
+                    negative_binomial_probs = kwargs.get("negative_binomial_probs", getattr(self.config, "negative_binomial_probs", 0.5))
+                    if negative_binomial_noise_schedule == "linear":
+                        current_negative_binomial_noise_scale = current_negative_binomial_noise_scale * (1.0 - step_ratio)
+                    elif negative_binomial_noise_schedule == "cosine":
+                        current_negative_binomial_noise_scale = current_negative_binomial_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif negative_binomial_noise_schedule == "exponential":
+                        current_negative_binomial_noise_scale = current_negative_binomial_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif negative_binomial_noise_schedule == "cyclic":
+                        current_negative_binomial_noise_scale = current_negative_binomial_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    current_negative_binomial_noise_scale = max(current_negative_binomial_noise_scale, min_negative_binomial_noise_scale)
+
+                    if isinstance(current_negative_binomial_noise_scale, float) and current_negative_binomial_noise_scale > 0.0:
+                        try:
+                            from torch.distributions import NegativeBinomial
+                            total_count_tensor = torch.full((logits.shape[-1],), negative_binomial_total_count, device=logits.device)
+                            probs_tensor = torch.full((logits.shape[-1],), negative_binomial_probs, device=logits.device)
+                            negative_binomial_dist = NegativeBinomial(total_count_tensor, probs_tensor)
+                            noise = negative_binomial_dist.sample(logits.shape[:-1]).to(logits.device) * current_negative_binomial_noise_scale
+                            logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+                        except ImportError:
+                            pass
+
 
                 if poisson_noise_scale > 0.0:
                     if poisson_noise_schedule == "linear":
@@ -3398,6 +3489,32 @@ class MDLMRequest:
     dirichlet_noise_schedule: str = "constant"
     min_dirichlet_noise_scale: float = 0.0
     dirichlet_noise_alpha: float = 1.0
+    inverse_gamma_noise_scale: float = 0.0
+    inverse_gamma_noise_schedule: str = "constant"
+    min_inverse_gamma_noise_scale: float = 0.0
+    inverse_gamma_concentration: float = 1.0
+    geometric_noise_scale: float = 0.0
+    geometric_noise_schedule: str = "constant"
+    min_geometric_noise_scale: float = 0.0
+    geometric_probs: float = 0.5
+    negative_binomial_noise_scale: float = 0.0
+    negative_binomial_noise_schedule: str = "constant"
+    min_negative_binomial_noise_scale: float = 0.0
+    negative_binomial_total_count: float = 1.0
+    negative_binomial_probs: float = 0.5
+    inverse_gamma_noise_scale: float = 0.0
+    inverse_gamma_noise_schedule: str = "constant"
+    min_inverse_gamma_noise_scale: float = 0.0
+    inverse_gamma_concentration: float = 1.0
+    geometric_noise_scale: float = 0.0
+    geometric_noise_schedule: str = "constant"
+    min_geometric_noise_scale: float = 0.0
+    geometric_probs: float = 0.5
+    negative_binomial_noise_scale: float = 0.0
+    negative_binomial_noise_schedule: str = "constant"
+    min_negative_binomial_noise_scale: float = 0.0
+    negative_binomial_total_count: float = 1.0
+    negative_binomial_probs: float = 0.5
     poisson_noise_scale: float = 0.0
     poisson_noise_schedule: str = "constant"
     min_poisson_noise_scale: float = 0.0
@@ -4215,6 +4332,76 @@ class MDLMContinuousBatchingManager:
                     dirichlet_dist = torch.distributions.dirichlet.Dirichlet(alpha_tensor)
                     noise = dirichlet_dist.sample(req_logits.shape[:-1]).to(req_logits.device) * current_dirichlet_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+                current_inverse_gamma_noise_scale = req.inverse_gamma_noise_scale
+                if isinstance(current_inverse_gamma_noise_scale, float) and current_inverse_gamma_noise_scale > 0.0:
+                    if req.inverse_gamma_noise_schedule == "linear":
+                        current_inverse_gamma_noise_scale = req.inverse_gamma_noise_scale * (1.0 - step_ratio)
+                    elif req.inverse_gamma_noise_schedule == "cosine":
+                        current_inverse_gamma_noise_scale = req.inverse_gamma_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif req.inverse_gamma_noise_schedule == "exponential":
+                        current_inverse_gamma_noise_scale = req.inverse_gamma_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif req.inverse_gamma_noise_schedule == "cyclic":
+                        current_inverse_gamma_noise_scale = req.inverse_gamma_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    if isinstance(req.min_inverse_gamma_noise_scale, float):
+                        current_inverse_gamma_noise_scale = max(current_inverse_gamma_noise_scale, req.min_inverse_gamma_noise_scale)
+
+                    try:
+                        from torch.distributions import InverseGamma
+                        concentration_tensor = torch.full((req_logits.shape[-1],), req.inverse_gamma_concentration if isinstance(req.inverse_gamma_concentration, float) else 1.0, device=req_logits.device)
+                        rate_tensor = torch.ones_like(concentration_tensor)
+                        inverse_gamma_dist = InverseGamma(concentration_tensor, rate_tensor)
+                        noise = inverse_gamma_dist.sample(req_logits.shape[:-1]).to(req_logits.device) * current_inverse_gamma_noise_scale
+                        req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+                    except ImportError:
+                        pass
+
+                current_geometric_noise_scale = req.geometric_noise_scale
+                if isinstance(current_geometric_noise_scale, float) and current_geometric_noise_scale > 0.0:
+                    if req.geometric_noise_schedule == "linear":
+                        current_geometric_noise_scale = req.geometric_noise_scale * (1.0 - step_ratio)
+                    elif req.geometric_noise_schedule == "cosine":
+                        current_geometric_noise_scale = req.geometric_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif req.geometric_noise_schedule == "exponential":
+                        current_geometric_noise_scale = req.geometric_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif req.geometric_noise_schedule == "cyclic":
+                        current_geometric_noise_scale = req.geometric_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    if isinstance(req.min_geometric_noise_scale, float):
+                        current_geometric_noise_scale = max(current_geometric_noise_scale, req.min_geometric_noise_scale)
+
+                    try:
+                        from torch.distributions import Geometric
+                        probs_tensor = torch.full((req_logits.shape[-1],), req.geometric_probs if isinstance(req.geometric_probs, float) else 0.5, device=req_logits.device)
+                        geometric_dist = Geometric(probs_tensor)
+                        noise = geometric_dist.sample(req_logits.shape[:-1]).to(req_logits.device) * current_geometric_noise_scale
+                        req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+                    except ImportError:
+                        pass
+
+                current_negative_binomial_noise_scale = req.negative_binomial_noise_scale
+                if isinstance(current_negative_binomial_noise_scale, float) and current_negative_binomial_noise_scale > 0.0:
+                    if req.negative_binomial_noise_schedule == "linear":
+                        current_negative_binomial_noise_scale = req.negative_binomial_noise_scale * (1.0 - step_ratio)
+                    elif req.negative_binomial_noise_schedule == "cosine":
+                        current_negative_binomial_noise_scale = req.negative_binomial_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif req.negative_binomial_noise_schedule == "exponential":
+                        current_negative_binomial_noise_scale = req.negative_binomial_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif req.negative_binomial_noise_schedule == "cyclic":
+                        current_negative_binomial_noise_scale = req.negative_binomial_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+
+                    if isinstance(req.min_negative_binomial_noise_scale, float):
+                        current_negative_binomial_noise_scale = max(current_negative_binomial_noise_scale, req.min_negative_binomial_noise_scale)
+
+                    try:
+                        from torch.distributions import NegativeBinomial
+                        total_count_tensor = torch.full((req_logits.shape[-1],), req.negative_binomial_total_count if isinstance(req.negative_binomial_total_count, float) else 1.0, device=req_logits.device)
+                        probs_tensor = torch.full((req_logits.shape[-1],), req.negative_binomial_probs if isinstance(req.negative_binomial_probs, float) else 0.5, device=req_logits.device)
+                        negative_binomial_dist = NegativeBinomial(total_count_tensor, probs_tensor)
+                        noise = negative_binomial_dist.sample(req_logits.shape[:-1]).to(req_logits.device) * current_negative_binomial_noise_scale
+                        req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+                    except ImportError:
+                        pass
 
             if req.poisson_noise_scale > 0.0:
                 current_poisson_noise_scale = req.poisson_noise_scale
