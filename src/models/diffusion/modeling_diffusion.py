@@ -888,6 +888,12 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         min_beta_prime_noise_scale: float = 0.0,
         beta_prime_alpha: float = 1.0,
         beta_prime_beta: float = 1.0,
+        frechet_noise_scale: float = 0.0,
+        frechet_noise_schedule: str = "constant",
+        min_frechet_noise_scale: float = 0.0,
+        frechet_alpha: float = 1.0,
+        frechet_loc: float = 0.0,
+        frechet_scale: float = 1.0,
         beta_noise_scale: float = 0.0,
         beta_noise_schedule: str = "constant",
         min_beta_noise_scale: float = 0.0,
@@ -2299,6 +2305,31 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = (beta_sample / (1.0 - beta_sample + 1e-8)) * current_beta_prime_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
+                current_frechet_noise_scale = 0.0
+                if frechet_noise_scale > 0.0:
+                    if frechet_noise_schedule == "linear":
+                        current_frechet_noise_scale = frechet_noise_scale * (1.0 - step_ratio)
+                    elif frechet_noise_schedule == "cosine":
+                        current_frechet_noise_scale = frechet_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif frechet_noise_schedule == "exponential":
+                        current_frechet_noise_scale = frechet_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif frechet_noise_schedule == "cyclic":
+                        current_frechet_noise_scale = frechet_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                    else:
+                        current_frechet_noise_scale = frechet_noise_scale
+                    current_frechet_noise_scale = max(current_frechet_noise_scale, min_frechet_noise_scale)
+                else:
+                    current_frechet_noise_scale = frechet_noise_scale
+
+                if current_frechet_noise_scale > 0.0:
+                    u = torch.rand(logits.shape, device=logits.device)
+                    # Inverse transform sampling for Fréchet distribution
+                    # F(x) = exp(-((x-loc)/scale)^(-alpha))
+                    # x = loc + scale * (-ln(u))^(-1/alpha)
+                    frechet_sample = frechet_loc + frechet_scale * ((-torch.log(u + 1e-8)) ** (-1.0 / frechet_alpha))
+                    noise = frechet_sample * current_frechet_noise_scale
+                    logits = torch.where(logits != -float("Inf"), logits + noise, logits)
+
                 if beta_noise_scale > 0.0:
                     if beta_noise_schedule == "linear":
                         current_beta_noise_scale = beta_noise_scale * (1.0 - step_ratio)
@@ -3508,6 +3539,12 @@ class MDLMRequest:
     min_beta_prime_noise_scale: float = 0.0
     beta_prime_alpha: float = 1.0
     beta_prime_beta: float = 1.0
+    frechet_noise_scale: float = 0.0
+    frechet_noise_schedule: str = "constant"
+    min_frechet_noise_scale: float = 0.0
+    frechet_alpha: float = 1.0
+    frechet_loc: float = 0.0
+    frechet_scale: float = 1.0
     beta_noise_scale: float = 0.0
     beta_noise_schedule: str = "constant"
     min_beta_noise_scale: float = 0.0
@@ -4331,6 +4368,25 @@ class MDLMContinuousBatchingManager:
                     beta_dist = torch.distributions.beta.Beta(req.beta_prime_alpha, req.beta_prime_beta)
                     beta_sample = beta_dist.sample(req_logits.shape).to(req_logits.device)
                     noise = (beta_sample / (1.0 - beta_sample + 1e-8)) * current_beta_prime_noise_scale
+                    req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
+
+            current_frechet_noise_scale = 0.0
+            if req.frechet_noise_scale > 0.0:
+                current_frechet_noise_scale = req.frechet_noise_scale
+                if req.frechet_noise_schedule == "linear":
+                    current_frechet_noise_scale = req.frechet_noise_scale * (1.0 - step_ratio)
+                elif req.frechet_noise_schedule == "cosine":
+                    current_frechet_noise_scale = req.frechet_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.frechet_noise_schedule == "exponential":
+                    current_frechet_noise_scale = req.frechet_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.frechet_noise_schedule == "cyclic":
+                    current_frechet_noise_scale = req.frechet_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_frechet_noise_scale = max(current_frechet_noise_scale, req.min_frechet_noise_scale)
+
+                if current_frechet_noise_scale > 0.0:
+                    u = torch.rand(req_logits.shape, device=req_logits.device)
+                    frechet_sample = req.frechet_loc + req.frechet_scale * ((-torch.log(u + 1e-8)) ** (-1.0 / req.frechet_alpha))
+                    noise = frechet_sample * current_frechet_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
             if req.beta_noise_scale > 0.0:

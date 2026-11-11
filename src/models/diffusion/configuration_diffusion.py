@@ -44,9 +44,21 @@ class DiffusionConfig(PretrainedConfig):
         half_cauchy_noise_scale=0.0,
         half_cauchy_noise_schedule="constant",
         min_half_cauchy_noise_scale=0.0,
+        frechet_noise_scale=0.0,
+        frechet_noise_schedule="constant",
+        min_frechet_noise_scale=0.0,
+        frechet_alpha=1.0,
+        frechet_loc=0.0,
+        frechet_scale=1.0,
         **kwargs
     ):
         super().__init__(**kwargs)
+        self.frechet_noise_scale = frechet_noise_scale
+        self.frechet_noise_schedule = frechet_noise_schedule
+        self.min_frechet_noise_scale = min_frechet_noise_scale
+        self.frechet_alpha = frechet_alpha
+        self.frechet_loc = frechet_loc
+        self.frechet_scale = frechet_scale
         self.logit_softcapping = logit_softcapping
         self.half_normal_noise_scale = half_normal_noise_scale
         self.half_normal_noise_schedule = half_normal_noise_schedule
