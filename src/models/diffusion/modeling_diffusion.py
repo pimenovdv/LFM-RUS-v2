@@ -254,10 +254,9 @@ class LatentDiffusionModelForConditionalGeneration(PreTrainedModel):
     def forward(self, input_ids=None, timesteps=None, attention_mask=None, labels=None, **kwargs):
         # 1. Encode into latents
         with torch.no_grad():
-            enc_outputs = self.autoencoder(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
+            self.autoencoder(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
             # vq_indices represent the tokens in the latent space
             # but since we want to run diffusion on these tokens, we extract the indices from the quantizer
-            hidden_states = enc_outputs.hidden_states # this is quantized continuous vector
 
             # Recompute vq_indices to run diffusion on them
             flat_inputs = self.autoencoder.pre_quant_proj(self.autoencoder.encoder_model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state).reshape(-1, self.autoencoder.vq.embedding_dim)
@@ -709,7 +708,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         if is_masked.any():
             # Create a one-hot representation of the target ids
-            target_one_hot = F.one_hot(target_ids.clamp(0, vocab_size - 1), num_classes=vocab_size).float()
+            F.one_hot(target_ids.clamp(0, vocab_size - 1), num_classes=vocab_size).float()
 
             # The target distribution for flow matching at time t is an interpolation:
             # (1 - t) * target_one_hot + t * mask_distribution

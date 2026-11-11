@@ -1,6 +1,4 @@
-import pytest
 import torch
-from unittest.mock import MagicMock
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager, MDLMRequest
 
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
@@ -38,7 +36,7 @@ def test_diffusion_frechet_noise_generation(mocker):
     mock_rand.side_effect = lambda shape, device=None: torch.full(shape, 0.5, device=device)
 
     # We patch torch.where since we want to see the modified logits
-    mock_where = mocker.patch("src.models.diffusion.modeling_diffusion.torch.where", wraps=torch.where)
+    mocker.patch("src.models.diffusion.modeling_diffusion.torch.where", wraps=torch.where)
 
     input_ids = torch.zeros(1, 5, dtype=torch.long)
 
@@ -92,7 +90,7 @@ def test_diffusion_frechet_noise_continuous_batching(mocker):
         frechet_scale=0.5,
     )
 
-    req_logits = torch.zeros(5, 100)
+    torch.zeros(5, 100)
 
     mock_rand = mocker.patch("src.models.diffusion.modeling_diffusion.torch.rand")
     mock_rand.return_value = torch.full((5, 100), 0.5)

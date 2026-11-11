@@ -1,4 +1,3 @@
-import pytest
 import torch
 from unittest.mock import MagicMock
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager, MDLMRequest
@@ -38,7 +37,7 @@ def test_diffusion_beta_prime_noise_generation(mocker):
     mock_sample.side_effect = lambda shape: torch.full(shape, 0.5)
 
     # We patch torch.where since we want to see the modified logits
-    mock_where = mocker.patch("src.models.diffusion.modeling_diffusion.torch.where", wraps=torch.where)
+    mocker.patch("src.models.diffusion.modeling_diffusion.torch.where", wraps=torch.where)
 
     input_ids = torch.zeros(1, 5, dtype=torch.long)
 
@@ -94,7 +93,7 @@ def test_diffusion_beta_prime_noise_continuous_batching(mocker):
         beta_prime_beta=2.0
     )
 
-    req_logits = torch.zeros(5, 100)
+    torch.zeros(5, 100)
 
     mock_sample = mocker.patch("torch.distributions.beta.Beta.sample")
     mock_sample.return_value = torch.full((5, 100), 0.5)
@@ -104,7 +103,7 @@ def test_diffusion_beta_prime_noise_continuous_batching(mocker):
     # Call the logic directly inside step or mimic it
     # We patch inside the manager
     step_ratio = 0.5
-    current_beta_prime_noise_scale = req.beta_prime_noise_scale * 0.5 * (1.0 + torch.cos(torch.tensor(3.14159 * step_ratio)).item())
+    req.beta_prime_noise_scale * 0.5 * (1.0 + torch.cos(torch.tensor(3.14159 * step_ratio)).item())
 
     # For unit testing we'll just force the manager step logic to run.
     manager.step = MagicMock() # we don't really run manager.step() since it is large,
