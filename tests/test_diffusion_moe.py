@@ -1,6 +1,6 @@
 import pytest
 import torch
-from transformers import AutoConfig, AutoModel
+from transformers import AutoConfig
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, SparseMoEBlock
 

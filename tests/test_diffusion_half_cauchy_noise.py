@@ -1,6 +1,5 @@
 import pytest
 import torch
-import math
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
 
@@ -64,7 +63,7 @@ def test_half_cauchy_noise_continuous_batching(mocker, mock_diffusion_model):
 
     mock_sample = mocker.patch("torch.distributions.HalfCauchy.sample", side_effect=lambda shape: torch.ones(shape))
 
-    req_id = manager.add_request(
+    manager.add_request(
         input_ids=torch.tensor([[1, 2, 3]]),
         max_new_tokens=5,
         total_steps=5,
@@ -82,7 +81,7 @@ def test_half_cauchy_noise_continuous_batching_schedules(mocker, mock_diffusion_
         manager = MDLMContinuousBatchingManager(model, max_batch_size=8)
         mock_sample = mocker.patch("torch.distributions.HalfCauchy.sample", side_effect=lambda shape: torch.ones(shape))
 
-        req_id = manager.add_request(
+        manager.add_request(
             input_ids=torch.tensor([[1, 2, 3]]),
             max_new_tokens=5,
             total_steps=5,

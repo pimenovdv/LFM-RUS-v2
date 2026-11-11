@@ -1,7 +1,7 @@
 import pytest
 import torch
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
-from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager, MDLMRequest
+from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
 
 class Output:
     def __init__(self, logits):

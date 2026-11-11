@@ -1,4 +1,3 @@
-import pytest
 import torch
 from unittest.mock import MagicMock
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, DiffusionConfig

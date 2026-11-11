@@ -2,7 +2,7 @@ import pytest
 import torch
 from unittest.mock import MagicMock
 
-from src.models.diffusion.modeling_diffusion import MDLMContinuousBatchingManager, MDLMRequest, DiffusionModelForConditionalGeneration
+from src.models.diffusion.modeling_diffusion import MDLMContinuousBatchingManager, DiffusionModelForConditionalGeneration
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 
 @pytest.fixture

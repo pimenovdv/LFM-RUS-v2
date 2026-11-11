@@ -81,7 +81,6 @@ def test_continuous_batching_temperature_sampling(mocker):
     assert len(results) == 2
     assert results[0] is not None
     assert results[1] is not None
-import torch
 from tests.test_diffusion_continuous_batching_sampling import get_mock_model
 
 def test_coverage(mocker):

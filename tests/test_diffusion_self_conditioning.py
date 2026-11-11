@@ -1,5 +1,4 @@
 import torch
-import pytest
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
 
@@ -13,7 +12,6 @@ def test_diffusion_self_conditioning(mocker):
     model = DiffusionModelForConditionalGeneration(config)
 
     # We need to mock forward to track if inputs_embeds is passed
-    original_forward = model.forward
     forward_spy = mocker.spy(model, "forward")
 
     # Mocking to make it faster and predictable if needed, but since we use small config,

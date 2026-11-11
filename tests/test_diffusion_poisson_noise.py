@@ -1,7 +1,5 @@
 import pytest
 import torch
-import math
-from unittest.mock import MagicMock, call
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, DiffusionConfig, MDLMContinuousBatchingManager, MDLMRequest
 
 class Output:
@@ -50,7 +48,7 @@ def test_poisson_noise_schedule(mock_model, mocker):
         return torch.ones(shape)
 
     mock_sample = mocker.patch("torch.distributions.poisson.Poisson.sample", side_effect=side_effect)
-    mock_where = mocker.patch("torch.where", side_effect=lambda cond, x, y: x)
+    mocker.patch("torch.where", side_effect=lambda cond, x, y: x)
 
     # Test linear schedule
     mock_model.generate(

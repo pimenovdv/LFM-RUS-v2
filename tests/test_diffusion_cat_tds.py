@@ -1,8 +1,8 @@
 import pytest
 import torch
-from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager, MDLMRequest
+from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
-from transformers import AutoModelForCausalLM, AutoConfig
+from transformers import AutoConfig
 
 class DummyAutoModel(torch.nn.Module):
     def __init__(self, config):
@@ -104,7 +104,6 @@ def test_tds_sampling_generation(dummy_model, mocker):
     mocker.patch('torch.nn.functional.softmax', side_effect=mock_softmax)
 
     # Using a seeded RNG or mocking torch.rand_like to always drop all non-max elements
-    original_rand_like = torch.rand_like
     def mock_rand_like(input, *args, **kwargs):
         # return a tensor of zeros so it's always less than token_drop_prob (which is 1.0)
         return torch.zeros_like(input)
@@ -134,7 +133,7 @@ def test_continuous_batching_cat_tds(dummy_model, mocker):
 
     manager = MDLMContinuousBatchingManager(dummy_model)
 
-    req_id = manager.add_request(
+    manager.add_request(
         input_ids=torch.tensor([[1, 2, 3]]),
         max_new_tokens=2,
         total_steps=2,
@@ -151,7 +150,6 @@ def test_continuous_batching_cat_tds(dummy_model, mocker):
         return original_softmax(input, dim=dim, dtype=_dtype)
     mocker.patch('torch.nn.functional.softmax', side_effect=mock_softmax)
 
-    original_rand_like = torch.rand_like
     def mock_rand_like(input, *args, **kwargs):
         return torch.zeros_like(input)
     mocker.patch('torch.rand_like', side_effect=mock_rand_like)

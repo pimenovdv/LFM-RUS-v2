@@ -1,5 +1,4 @@
 import torch
-import pytest
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
 

@@ -1,7 +1,5 @@
 import pytest
 import torch
-import math
-import torch.nn.functional as F
 from transformers import AutoConfig
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager

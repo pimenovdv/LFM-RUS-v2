@@ -1,10 +1,11 @@
-import pytest
 import torch
-import math
-from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, DiffusionConfig
 from tests.test_diffusion_continuous_batching_sampling import get_mock_model
-from src.models.diffusion.modeling_diffusion import MDLMRequest, MDLMContinuousBatchingManager
-from tests.test_diffusion_smooth_k_positional_temp import dummy_model
+from src.models.diffusion.modeling_diffusion import MDLMContinuousBatchingManager
+import pytest
+
+@pytest.fixture
+def dummy_model(mocker):
+    return get_mock_model(mocker)
 
 def test_rayleigh_noise_generation(dummy_model, mocker):
     mock_rand = mocker.patch("torch.rand")
