@@ -13,8 +13,8 @@ def create_mock_tokenizer():
 
 def test_prepare_diffusion_trajectory_no_input_ids(mocker):
     config = VRPOConfig(diffusion_steps=10, use_cpu=True)
-    create_mock_tokenizer()
-    Dataset.from_dict({"prompt": ["test"]})
+    tokenizer = create_mock_tokenizer()
+    dataset = Dataset.from_dict({"prompt": ["test"]})
     trainer = VRPOTrainer.__new__(VRPOTrainer)
     trainer.args = config
     with pytest.raises(ValueError, match="input_ids not provided for diffusion trajectory"):

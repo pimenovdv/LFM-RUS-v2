@@ -1,6 +1,8 @@
 import pytest
 import torch
+import math
 import torch.nn.functional as F
+from unittest.mock import MagicMock, call
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, DiffusionConfig, MDLMContinuousBatchingManager, MDLMRequest
 
 class Output:
@@ -30,7 +32,7 @@ def test_tsallis_entropy_generation(mock_model, mocker):
     # The simplest way is to check that generating with this parameter enabled triggers no exceptions.
 
     mock_softmax = mocker.patch("torch.nn.functional.softmax", wraps=F.softmax)
-    mocker.patch("torch.multinomial", side_effect=lambda input, num_samples: torch.zeros((input.shape[0], num_samples), dtype=torch.long))
+    mock_multinomial = mocker.patch("torch.multinomial", side_effect=lambda input, num_samples: torch.zeros((input.shape[0], num_samples), dtype=torch.long))
 
     mock_model.generate(
         input_ids,
@@ -49,7 +51,7 @@ def test_tsallis_entropy_generation_q_1(mock_model, mocker):
     input_ids = torch.tensor([[0, 2, 3]])
 
     mock_softmax = mocker.patch("torch.nn.functional.softmax", wraps=F.softmax)
-    mocker.patch("torch.multinomial", side_effect=lambda input, num_samples: torch.zeros((input.shape[0], num_samples), dtype=torch.long))
+    mock_multinomial = mocker.patch("torch.multinomial", side_effect=lambda input, num_samples: torch.zeros((input.shape[0], num_samples), dtype=torch.long))
 
     mock_model.generate(
         input_ids,
@@ -68,7 +70,7 @@ def test_tsallis_entropy_schedule(mock_model, mocker):
     input_ids = torch.tensor([[0, 0, 0]])
 
     mock_softmax = mocker.patch("torch.nn.functional.softmax", wraps=F.softmax)
-    mocker.patch("torch.multinomial", side_effect=lambda input, num_samples: torch.zeros((input.shape[0], num_samples), dtype=torch.long))
+    mock_multinomial = mocker.patch("torch.multinomial", side_effect=lambda input, num_samples: torch.zeros((input.shape[0], num_samples), dtype=torch.long))
 
     # linear
     mock_model.generate(
@@ -131,7 +133,7 @@ def test_tsallis_entropy_continuous_batching(mock_model, mocker):
     manager.pending_requests.append(req2)
 
     mock_softmax = mocker.patch("torch.nn.functional.softmax", wraps=F.softmax)
-    mocker.patch("torch.multinomial", side_effect=lambda input, num_samples: torch.zeros((input.shape[0], num_samples), dtype=torch.long))
+    mock_multinomial = mocker.patch("torch.multinomial", side_effect=lambda input, num_samples: torch.zeros((input.shape[0], num_samples), dtype=torch.long))
 
     manager.step()
 

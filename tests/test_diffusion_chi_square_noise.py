@@ -1,6 +1,8 @@
 import pytest
 import torch
-from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
+import math
+from transformers import AutoConfig
+from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager, MDLMRequest
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 
 @pytest.fixture

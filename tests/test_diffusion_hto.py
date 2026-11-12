@@ -32,7 +32,7 @@ def test_harmonic_temperature_oscillation_generate(dummy_model, mocker):
     input_ids = torch.tensor([[0, 1, 2, 100, 100]])
 
     # We want to spy on torch.multinomial to verify the logic runs without error
-    mocker.spy(torch, "multinomial")
+    spy_multinomial = mocker.spy(torch, "multinomial")
 
     out = dummy_model.generate(
         input_ids,
@@ -60,7 +60,7 @@ def test_harmonic_temperature_oscillation_continuous_batching(dummy_model, mocke
         temperature_oscillation_frequency=1.0
     )
 
-    mocker.spy(torch, "multinomial")
+    spy_multinomial = mocker.spy(torch, "multinomial")
 
     while len(manager.active_requests) > 0:
         manager.step()

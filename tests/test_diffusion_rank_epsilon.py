@@ -1,7 +1,9 @@
 import pytest
 import torch
+import math
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
-from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
+from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager, MDLMRequest
+import torch.nn.functional as F
 
 @pytest.fixture
 def mock_model(mocker):
@@ -48,9 +50,9 @@ def test_epsilon_greedy_sampling_generate(mock_model, mocker):
     input_ids = torch.full((1, 5), mock_model.config.mask_token_id, dtype=torch.long)
 
     mock_rand = mocker.patch("torch.rand", return_value=torch.zeros(1)) # force random path
-    mocker.patch("torch.multinomial", side_effect=lambda x, num_samples: torch.zeros((x.shape[0], num_samples), dtype=torch.long))
+    mock_multinomial = mocker.patch("torch.multinomial", side_effect=lambda x, num_samples: torch.zeros((x.shape[0], num_samples), dtype=torch.long))
 
-    mock_model.generate(
+    out = mock_model.generate(
         input_ids,
         max_new_tokens=5,
         total_steps=10,
@@ -64,7 +66,7 @@ def test_continuous_batching_rank_based(mock_model, mocker):
     manager = MDLMContinuousBatchingManager(model=mock_model)
     input_ids = torch.full((1, 5), mock_model.config.mask_token_id, dtype=torch.long)
 
-    manager.add_request(
+    req_id = manager.add_request(
         input_ids=input_ids,
         max_new_tokens=5,
         total_steps=10,
@@ -81,7 +83,7 @@ def test_continuous_batching_epsilon_greedy(mock_model, mocker):
     manager = MDLMContinuousBatchingManager(model=mock_model)
     input_ids = torch.full((1, 5), mock_model.config.mask_token_id, dtype=torch.long)
 
-    manager.add_request(
+    req_id = manager.add_request(
         input_ids=input_ids,
         max_new_tokens=5,
         total_steps=10,
@@ -89,7 +91,7 @@ def test_continuous_batching_epsilon_greedy(mock_model, mocker):
     )
 
     mock_rand = mocker.patch("torch.rand", return_value=torch.zeros(1)) # force random path
-    mocker.patch("torch.multinomial", side_effect=lambda x, num_samples: torch.zeros((x.shape[0], num_samples), dtype=torch.long))
+    mock_multinomial = mocker.patch("torch.multinomial", side_effect=lambda x, num_samples: torch.zeros((x.shape[0], num_samples), dtype=torch.long))
 
     manager.step()
 

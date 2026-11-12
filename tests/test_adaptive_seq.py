@@ -1,6 +1,8 @@
+import pytest
 import torch
+import math
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, DiffusionConfig
-from transformers import AutoConfig
+from transformers import AutoModelForCausalLM, AutoConfig
 
 class MockOutput:
     def __init__(self, logits):
@@ -29,7 +31,7 @@ def test_adaptive_sequence_length_guidance(mocker):
     )
 
     hf_config = AutoConfig.for_model("gpt2", vocab_size=100)
-    MockAutoModelForCausalLM(hf_config)
+    inner_model = MockAutoModelForCausalLM(hf_config)
 
     model = DiffusionModelForConditionalGeneration(config)
     model.eval()
@@ -90,7 +92,7 @@ def test_information_gain_masking(mocker):
     )
 
     hf_config = AutoConfig.for_model("gpt2", vocab_size=100)
-    MockAutoModelForCausalLM(hf_config)
+    inner_model = MockAutoModelForCausalLM(hf_config)
 
     model = DiffusionModelForConditionalGeneration(config)
     model.eval()
@@ -117,7 +119,7 @@ def test_information_gain_masking_with_uncond(mocker):
     )
 
     hf_config = AutoConfig.for_model("gpt2", vocab_size=100)
-    MockAutoModelForCausalLM(hf_config)
+    inner_model = MockAutoModelForCausalLM(hf_config)
 
     model = DiffusionModelForConditionalGeneration(config)
     model.eval()

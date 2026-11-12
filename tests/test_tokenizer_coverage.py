@@ -1,3 +1,4 @@
+import pytest
 from src.tokenizer import run_lexical_initialization
 
 def test_run_lexical_initialization_focus_no_output_embeddings(mocker):

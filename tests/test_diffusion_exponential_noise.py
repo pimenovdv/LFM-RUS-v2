@@ -2,6 +2,7 @@ import torch
 import pytest
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager, MDLMRequest
+import math
 
 class Output:
     def __init__(self, logits):
@@ -71,7 +72,7 @@ def test_continuous_batching_with_exponential_noise(mock_model, mocker):
     # Due to padding and context length: batch_size=1, seq_len=5, vocab_size=100
     mock_sample.side_effect = lambda shape: torch.ones(shape)
 
-    manager.add_request(**config)
+    req_id = manager.add_request(**config)
 
     while manager.active_requests or manager.pending_requests:
         manager.step()

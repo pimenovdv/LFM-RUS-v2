@@ -1,7 +1,9 @@
 import pytest
 import torch
-from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
+import torch.nn.functional as F
+from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager, MDLMRequest
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
+import math
 
 
 @pytest.fixture

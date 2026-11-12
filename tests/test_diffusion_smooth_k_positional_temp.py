@@ -1,8 +1,8 @@
 import pytest
 import torch
-from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
+from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager, MDLMRequest
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
-from transformers import AutoConfig
+from transformers import AutoModelForCausalLM, AutoConfig
 
 class DummyAutoModel(torch.nn.Module):
     def __init__(self, config):
@@ -110,7 +110,7 @@ def test_positional_temperature_generation(dummy_model, mocker):
 
     # Original logits: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
     # Positional scaling: temp = 1.0 + 1.0 * (pos / (seq_len - 1))
-    logits.shape[1]
+    seq_len = logits.shape[1]
 
     # Check pos 0: temp = 1.0, logit 9 -> 9.0
     assert abs(logits[0, 0, 9].item() - 9.0) < 1e-4
@@ -123,7 +123,7 @@ def test_continuous_batching_smooth_k_positional_temperature(dummy_model, mocker
 
     manager = MDLMContinuousBatchingManager(dummy_model)
 
-    manager.add_request(
+    req_id = manager.add_request(
         input_ids=torch.tensor([[1, 2, 3]]),
         max_new_tokens=2,
         total_steps=2,
@@ -146,7 +146,7 @@ def test_continuous_batching_smooth_k_positional_temperature(dummy_model, mocker
     assert len(logits_history) > 0
     logits = logits_history[-1]
 
-    logits.shape[1]
+    seq_len = logits.shape[1]
     # Check Positional Temperature on top elements
     # SmoothK keeps top 2 intact.
     # top 2 at pos 0: 8 and 9. Temp is 1.0 -> 8.0 and 9.0

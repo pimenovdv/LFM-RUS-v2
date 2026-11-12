@@ -1,6 +1,6 @@
 import pytest
 import torch
-from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
+from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 
 class MockOutput:

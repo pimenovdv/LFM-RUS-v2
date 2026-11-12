@@ -1,7 +1,7 @@
 from src.models.diffusion.modeling_diffusion import MDLMContinuousBatchingManager
 import pytest
 import torch
-from unittest.mock import MagicMock
+from unittest.mock import patch, MagicMock
 
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, DiffusionConfig
 

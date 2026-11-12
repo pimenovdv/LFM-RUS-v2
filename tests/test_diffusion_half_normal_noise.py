@@ -1,9 +1,9 @@
 import torch
 import pytest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, call
 
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
-from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
+from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager, MDLMRequest
 
 @pytest.fixture
 def dummy_model(mocker):

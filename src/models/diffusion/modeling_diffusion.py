@@ -254,9 +254,10 @@ class LatentDiffusionModelForConditionalGeneration(PreTrainedModel):
     def forward(self, input_ids=None, timesteps=None, attention_mask=None, labels=None, **kwargs):
         # 1. Encode into latents
         with torch.no_grad():
-            self.autoencoder(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
+            enc_outputs = self.autoencoder(input_ids=input_ids, attention_mask=attention_mask, return_dict=True)
             # vq_indices represent the tokens in the latent space
             # but since we want to run diffusion on these tokens, we extract the indices from the quantizer
+            hidden_states = enc_outputs.hidden_states # this is quantized continuous vector
 
             # Recompute vq_indices to run diffusion on them
             flat_inputs = self.autoencoder.pre_quant_proj(self.autoencoder.encoder_model(input_ids=input_ids, attention_mask=attention_mask).last_hidden_state).reshape(-1, self.autoencoder.vq.embedding_dim)
@@ -708,7 +709,7 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
 
         if is_masked.any():
             # Create a one-hot representation of the target ids
-            F.one_hot(target_ids.clamp(0, vocab_size - 1), num_classes=vocab_size).float()
+            target_one_hot = F.one_hot(target_ids.clamp(0, vocab_size - 1), num_classes=vocab_size).float()
 
             # The target distribution for flow matching at time t is an interpolation:
             # (1 - t) * target_one_hot + t * mask_distribution
@@ -887,12 +888,11 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
         min_beta_prime_noise_scale: float = 0.0,
         beta_prime_alpha: float = 1.0,
         beta_prime_beta: float = 1.0,
-        frechet_noise_scale: float = 0.0,
-        frechet_noise_schedule: str = "constant",
-        min_frechet_noise_scale: float = 0.0,
-        frechet_alpha: float = 1.0,
-        frechet_loc: float = 0.0,
-        frechet_scale: float = 1.0,
+        gumbel_max_noise_scale: float = 0.0,
+        gumbel_max_noise_schedule: str = "constant",
+        min_gumbel_max_noise_scale: float = 0.0,
+        gumbel_max_loc: float = 0.0,
+        gumbel_max_scale: float = 1.0,
         beta_noise_scale: float = 0.0,
         beta_noise_schedule: str = "constant",
         min_beta_noise_scale: float = 0.0,
@@ -2304,29 +2304,28 @@ class DiffusionModelForConditionalGeneration(PreTrainedModel):
                     noise = (beta_sample / (1.0 - beta_sample + 1e-8)) * current_beta_prime_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
-                current_frechet_noise_scale = 0.0
-                if frechet_noise_scale > 0.0:
-                    if frechet_noise_schedule == "linear":
-                        current_frechet_noise_scale = frechet_noise_scale * (1.0 - step_ratio)
-                    elif frechet_noise_schedule == "cosine":
-                        current_frechet_noise_scale = frechet_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
-                    elif frechet_noise_schedule == "exponential":
-                        current_frechet_noise_scale = frechet_noise_scale * math.exp(-3.0 * step_ratio)
-                    elif frechet_noise_schedule == "cyclic":
-                        current_frechet_noise_scale = frechet_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_gumbel_max_noise_scale = 0.0
+                if gumbel_max_noise_scale > 0.0:
+                    if gumbel_max_noise_schedule == "linear":
+                        current_gumbel_max_noise_scale = gumbel_max_noise_scale * (1.0 - step_ratio)
+                    elif gumbel_max_noise_schedule == "cosine":
+                        current_gumbel_max_noise_scale = gumbel_max_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                    elif gumbel_max_noise_schedule == "exponential":
+                        current_gumbel_max_noise_scale = gumbel_max_noise_scale * math.exp(-3.0 * step_ratio)
+                    elif gumbel_max_noise_schedule == "cyclic":
+                        current_gumbel_max_noise_scale = gumbel_max_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
                     else:
-                        current_frechet_noise_scale = frechet_noise_scale
-                    current_frechet_noise_scale = max(current_frechet_noise_scale, min_frechet_noise_scale)
+                        current_gumbel_max_noise_scale = gumbel_max_noise_scale
+                    current_gumbel_max_noise_scale = max(current_gumbel_max_noise_scale, min_gumbel_max_noise_scale)
                 else:
-                    current_frechet_noise_scale = frechet_noise_scale
+                    current_gumbel_max_noise_scale = gumbel_max_noise_scale
 
-                if current_frechet_noise_scale > 0.0:
+                if current_gumbel_max_noise_scale > 0.0:
                     u = torch.rand(logits.shape, device=logits.device)
-                    # Inverse transform sampling for Fréchet distribution
-                    # F(x) = exp(-((x-loc)/scale)^(-alpha))
-                    # x = loc + scale * (-ln(u))^(-1/alpha)
-                    frechet_sample = frechet_loc + frechet_scale * ((-torch.log(u + 1e-8)) ** (-1.0 / frechet_alpha))
-                    noise = frechet_sample * current_frechet_noise_scale
+                    # Inverse transform sampling for Gumbel distribution (Gumbel-Max trick)
+                    # x = loc - scale * ln(-ln(u))
+                    gumbel_max_sample = gumbel_max_loc - gumbel_max_scale * torch.log(-torch.log(u + 1e-8) + 1e-8)
+                    noise = gumbel_max_sample * current_gumbel_max_noise_scale
                     logits = torch.where(logits != -float("Inf"), logits + noise, logits)
 
                 if beta_noise_scale > 0.0:
@@ -3538,12 +3537,11 @@ class MDLMRequest:
     min_beta_prime_noise_scale: float = 0.0
     beta_prime_alpha: float = 1.0
     beta_prime_beta: float = 1.0
-    frechet_noise_scale: float = 0.0
-    frechet_noise_schedule: str = "constant"
-    min_frechet_noise_scale: float = 0.0
-    frechet_alpha: float = 1.0
-    frechet_loc: float = 0.0
-    frechet_scale: float = 1.0
+    gumbel_max_noise_scale: float = 0.0
+    gumbel_max_noise_schedule: str = "constant"
+    min_gumbel_max_noise_scale: float = 0.0
+    gumbel_max_loc: float = 0.0
+    gumbel_max_scale: float = 1.0
     beta_noise_scale: float = 0.0
     beta_noise_schedule: str = "constant"
     min_beta_noise_scale: float = 0.0
@@ -4369,23 +4367,23 @@ class MDLMContinuousBatchingManager:
                     noise = (beta_sample / (1.0 - beta_sample + 1e-8)) * current_beta_prime_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
-            current_frechet_noise_scale = 0.0
-            if req.frechet_noise_scale > 0.0:
-                current_frechet_noise_scale = req.frechet_noise_scale
-                if req.frechet_noise_schedule == "linear":
-                    current_frechet_noise_scale = req.frechet_noise_scale * (1.0 - step_ratio)
-                elif req.frechet_noise_schedule == "cosine":
-                    current_frechet_noise_scale = req.frechet_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
-                elif req.frechet_noise_schedule == "exponential":
-                    current_frechet_noise_scale = req.frechet_noise_scale * math.exp(-3.0 * step_ratio)
-                elif req.frechet_noise_schedule == "cyclic":
-                    current_frechet_noise_scale = req.frechet_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
-                current_frechet_noise_scale = max(current_frechet_noise_scale, req.min_frechet_noise_scale)
+            current_gumbel_max_noise_scale = 0.0
+            if req.gumbel_max_noise_scale > 0.0:
+                current_gumbel_max_noise_scale = req.gumbel_max_noise_scale
+                if req.gumbel_max_noise_schedule == "linear":
+                    current_gumbel_max_noise_scale = req.gumbel_max_noise_scale * (1.0 - step_ratio)
+                elif req.gumbel_max_noise_schedule == "cosine":
+                    current_gumbel_max_noise_scale = req.gumbel_max_noise_scale * 0.5 * (1.0 + math.cos(math.pi * step_ratio))
+                elif req.gumbel_max_noise_schedule == "exponential":
+                    current_gumbel_max_noise_scale = req.gumbel_max_noise_scale * math.exp(-3.0 * step_ratio)
+                elif req.gumbel_max_noise_schedule == "cyclic":
+                    current_gumbel_max_noise_scale = req.gumbel_max_noise_scale * 0.5 * (1.0 + math.cos(2.0 * math.pi * step_ratio))
+                current_gumbel_max_noise_scale = max(current_gumbel_max_noise_scale, req.min_gumbel_max_noise_scale)
 
-                if current_frechet_noise_scale > 0.0:
+                if current_gumbel_max_noise_scale > 0.0:
                     u = torch.rand(req_logits.shape, device=req_logits.device)
-                    frechet_sample = req.frechet_loc + req.frechet_scale * ((-torch.log(u + 1e-8)) ** (-1.0 / req.frechet_alpha))
-                    noise = frechet_sample * current_frechet_noise_scale
+                    gumbel_max_sample = req.gumbel_max_loc - req.gumbel_max_scale * torch.log(-torch.log(u + 1e-8) + 1e-8)
+                    noise = gumbel_max_sample * current_gumbel_max_noise_scale
                     req_logits = torch.where(req_logits != -float("Inf"), req_logits + noise, req_logits)
 
             if req.beta_noise_scale > 0.0:

@@ -1,6 +1,8 @@
 import pytest
 import torch
+import math
 import torch.nn.functional as F
+from unittest.mock import MagicMock, call
 from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, DiffusionConfig, MDLMContinuousBatchingManager, MDLMRequest
 
 class Output:
@@ -43,7 +45,7 @@ def test_gumbel_softmax_noise_schedule(mock_model, mocker):
     input_ids = torch.tensor([[0, 0, 0]])
 
     mock_softmax = mocker.patch("torch.nn.functional.softmax", wraps=F.softmax)
-    mocker.patch("torch.where", side_effect=lambda cond, x, y: x)
+    mock_where = mocker.patch("torch.where", side_effect=lambda cond, x, y: x)
 
     # Test linear schedule
     mock_model.generate(

@@ -2305,6 +2305,7 @@ def test_compute_consistency_loss(mocker):
     from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration
     from src.models.diffusion.configuration_diffusion import DiffusionConfig
     import torch
+    import torch.nn.functional as F
 
     mock_auto_model = mocker.patch("src.models.diffusion.modeling_diffusion.AutoModel")
     mocker.patch("src.models.diffusion.modeling_diffusion.AutoConfig")

@@ -1,5 +1,6 @@
+import pytest
 import torch
-from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMContinuousBatchingManager
+from src.models.diffusion.modeling_diffusion import DiffusionModelForConditionalGeneration, MDLMRequest, MDLMContinuousBatchingManager
 from src.models.diffusion.configuration_diffusion import DiffusionConfig
 
 def test_prob_threshold_generate(mocker):
@@ -89,6 +90,6 @@ def test_prob_threshold_continuous_batching(mocker):
     mocker.patch.object(model, 'forward', side_effect=mock_forward)
 
     for _ in range(5):
-        manager.step()
+        completed = manager.step()
         if len(manager.active_requests) == 0:
             break
